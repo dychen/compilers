@@ -1,6 +1,9 @@
 *.d
 *.o
 *.out
+*.output
 *.swp
 *.diff
 *.unfilt
+parser
+lexer

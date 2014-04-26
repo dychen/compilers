@@ -139,14 +139,23 @@
     %type <feature> feature
     %type <formals> formal_list
     %type <formal> formal
-    %type <expressions> expr_list
+    %type <expressions> expr_list_dispatch /* Comma-separated list */
+    %type <expressions> expr_list_block    /* Semicolon-separated list */
     %type <expression> expr
     %type <cases> case_list
     %type <case_> case
 
     /* Precedence declarations go here. */
 
-    
+    %left ASSIGN
+    %nonassoc NOT
+    %nonassoc LE '<' '='
+    %left '+' '-'
+    %left '*' '/'
+    %nonassoc ISVOID
+    %nonassoc '~'
+    %left '@'
+    %left '.'
     
     %%
     /* 
@@ -194,22 +203,35 @@
     formal:
     OBJECTID ':' TYPEID { $$ = formal($1, $3); }
 
-    expr_list:
+    expr_list_dispatch:
+    expr { $$ = single_Expressions($1); }
+    | expr_list_dispatch ',' expr { $$ = append_Expressions($1, single_Expressions($3)); }
+
+    expr_list_block:
     /* empty */ { $$ = nil_Expressions(); }
-    | expr_list expr ';' { $$ = append_Expressions($1, single_Expressions($2)); }
+    | expr_list_block expr ';' { $$ = append_Expressions($1, single_Expressions($2)); }
 
     expr:
-    TYPEID ASSIGN expr { $$ = assign($1, $3); }
-    | expr '.' OBJECTID '(' expr_list ')'
+    OBJECTID ASSIGN expr { $$ = assign($1, $3); }
+    | expr '.' OBJECTID '(' expr_list_dispatch ')'
         { $$ = dispatch($1, $3, $5); }
-    | OBJECTID '(' expr_list ')'
+    | expr '.' OBJECTID '(' ')'
+        { $$ = dispatch($1, $3, nil_Expressions()); }
+    | OBJECTID '(' expr_list_dispatch ')'
         { $$ = dispatch(object(idtable.add_string("self")), $1, $3); }
-    | expr '@' TYPEID '.' OBJECTID '(' expr_list ')'
+    | OBJECTID '(' ')'
+        { $$ = dispatch(object(idtable.add_string("self")), $1, nil_Expressions()); }
+    | expr '@' TYPEID '.' OBJECTID '(' expr_list_dispatch ')'
         { $$ = static_dispatch($1, $3, $5, $7); }
+    | expr '@' TYPEID '.' OBJECTID '(' ')'
+        { $$ = static_dispatch($1, $3, $5, nil_Expressions()); }
     | IF expr THEN expr ELSE expr FI { $$ = cond($2, $4, $6); }
     | WHILE expr LOOP expr POOL { $$ = loop($2, $4); }
-    | '{' expr_list '}' { $$ = block($2); }
-    /* LET */
+    | '{' expr_list_block '}' { $$ = block($2); }
+    | LET OBJECTID ':' TYPEID ASSIGN IN expr
+        { $$ = let($2, $4, no_expr(), $7); }
+    | LET OBJECTID ':' TYPEID ASSIGN expr IN expr
+        { $$ = let($2, $4, $6, $8); }
     | CASE expr OF case_list ESAC { $$ = typcase($2, $4); }
     | NEW TYPEID { $$ = new_($2); }
     | ISVOID expr { $$ = isvoid($2); }
