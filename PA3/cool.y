@@ -133,7 +133,7 @@
     %type <program> program
     %type <classes> class_list
     %type <class_> class
-    
+
     /* You will want to change the following line. */
     %type <features> feature_list
     %type <feature> feature
@@ -162,30 +162,34 @@
     /* 
     Save the root of the abstract syntax tree in a global variable.
     */
-    program	: class_list	{ @$ = @1; ast_root = program($1); }
-    ;
-    
-    class_list
-    : class			/* single class */
-    { $$ = single_Classes($1);
-    parse_results = $$; }
-    | class_list class	/* several classes */
-    { $$ = append_Classes($1,single_Classes($2)); 
-    parse_results = $$; }
-    ;
-    
+    program: class_list	{ @$ = @1; ast_root = program($1); }
+
+    class_list:
+    class
+        {
+            $$ = single_Classes($1);
+            parse_results = $$;
+        }
+    | class_list class
+        {
+            $$ = append_Classes($1, single_Classes($2)); 
+            parse_results = $$;
+        }
+
     /* If no parent is specified, the class inherits from the Object class. */
-    class	: CLASS TYPEID '{' feature_list '}' ';'
-    { $$ = class_($2,idtable.add_string("Object"),$4,
-    stringtable.add_string(curr_filename)); }
+    class:
+    CLASS TYPEID '{' feature_list '}' ';'
+        { $$ = class_($2, idtable.add_string("Object"),
+                      $4, stringtable.add_string(curr_filename)); }
     | CLASS TYPEID INHERITS TYPEID '{' feature_list '}' ';'
-    { $$ = class_($2,$4,$6,stringtable.add_string(curr_filename)); }
-    ;
-    
+        { $$ = class_($2, $4, $6, stringtable.add_string(curr_filename)); }
+    | CLASS error ';' class { $$ = $4; }
+
     /* Feature list may be empty, but no empty features in list. */
-    feature_list:		/* empty */
+    feature_list:
     /* empty */ {  $$ = nil_Features(); }
     | feature_list feature { $$ = append_Features($1, single_Features($2)); }
+    | feature_list error ';'
 
     feature:
     OBJECTID '(' formal_list ')' ':' TYPEID '{' expr '}' ';'
@@ -204,13 +208,16 @@
     formal:
     OBJECTID ':' TYPEID { $$ = formal($1, $3); }
 
+    /* Expressions as dispatch parameters */
     expr_list_dispatch:
     expr { $$ = single_Expressions($1); }
     | expr_list_dispatch ',' expr { $$ = append_Expressions($1, single_Expressions($3)); }
 
+    /* Expressions as block statements */
     expr_list_block:
-    /* empty */ { $$ = nil_Expressions(); }
+    expr ';' { $$ = single_Expressions($1); } /* Blocks can't be empty. */
     | expr_list_block expr ';' { $$ = append_Expressions($1, single_Expressions($2)); }
+    | expr_list_block error ';'
 
     expr:
     OBJECTID ASSIGN expr { $$ = assign($1, $3); }
@@ -248,6 +255,7 @@
     | STR_CONST { $$ = string_const($1); }
     | BOOL_CONST { $$ = bool_const($1); }
 
+    /* Nested let expressions (right-associative) */
     expr_let:
     OBJECTID ':' TYPEID IN expr
         { $$ = let($1, $3, no_expr(), $5); }
@@ -257,7 +265,7 @@
         { $$ = let($1, $3, no_expr(), $5); }
     | OBJECTID ':' TYPEID ASSIGN expr ',' expr_let
         { $$ = let($1, $3, $5, $7); }
-
+    | error ',' expr_let { $$ = $3; }
 
     case_list:
     /* empty */ { $$ = nil_Cases(); }

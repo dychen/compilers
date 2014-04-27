@@ -1,10 +1,1 @@
-	-1 (badblock)	 a block with multiple errors
-	-1 (badexprlist)	 bad expr lists 
-	-1 (badfeaturenames)	 method and attribute names capitalized
-	-1 (badfeatures)	 multiple errors in features in a class
-	-1 (firstbindingerrored)	 error recovery after a binding error
-	-1 (firstclasserrored)	 error recovery after a bad class declaration
-	-1 (multipleclasses)	 multiple classes in a file
-	-1 (multiplemethoderrors)	 a class with multiple methods and errors 
-	-1 (secondbindingerrored)	 second binding of a let has an error
-	-1 (while)	 valid and invalid while loops
+	(our tests)	Passed all tests -- congratulations!
