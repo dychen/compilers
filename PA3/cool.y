@@ -142,6 +142,7 @@
     %type <expressions> expr_list_dispatch /* Comma-separated list */
     %type <expressions> expr_list_block    /* Semicolon-separated list */
     %type <expression> expr
+    %type <expression> expr_let
     %type <cases> case_list
     %type <case_> case
 
@@ -228,10 +229,7 @@
     | IF expr THEN expr ELSE expr FI { $$ = cond($2, $4, $6); }
     | WHILE expr LOOP expr POOL { $$ = loop($2, $4); }
     | '{' expr_list_block '}' { $$ = block($2); }
-    | LET OBJECTID ':' TYPEID ASSIGN IN expr
-        { $$ = let($2, $4, no_expr(), $7); }
-    | LET OBJECTID ':' TYPEID ASSIGN expr IN expr
-        { $$ = let($2, $4, $6, $8); }
+    | LET expr_let { $$ = $2; }
     | CASE expr OF case_list ESAC { $$ = typcase($2, $4); }
     | NEW TYPEID { $$ = new_($2); }
     | ISVOID expr { $$ = isvoid($2); }
@@ -249,6 +247,17 @@
     | INT_CONST { $$ = int_const($1); }
     | STR_CONST { $$ = string_const($1); }
     | BOOL_CONST { $$ = bool_const($1); }
+
+    expr_let:
+    OBJECTID ':' TYPEID IN expr
+        { $$ = let($1, $3, no_expr(), $5); }
+    | OBJECTID ':' TYPEID ASSIGN expr IN expr
+        { $$ = let($1, $3, $5, $7); }
+    | OBJECTID ':' TYPEID ',' expr_let
+        { $$ = let($1, $3, no_expr(), $5); }
+    | OBJECTID ':' TYPEID ASSIGN expr ',' expr_let
+        { $$ = let($1, $3, $5, $7); }
+
 
     case_list:
     /* empty */ { $$ = nil_Cases(); }
