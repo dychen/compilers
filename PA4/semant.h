@@ -34,6 +34,8 @@ public:
   ostream& semant_error(Class_ c);
   ostream& semant_error(Symbol filename, tree_node *t);
   void validate();
+  Symbol lub(Symbol c1, Symbol c2);
+  bool isChild(Symbol child, Symbol parent);
 };
 
 

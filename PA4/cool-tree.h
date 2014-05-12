@@ -14,10 +14,13 @@
 #include <map>
 #include <symtab.h>
 
+class ClassTable; // Defined in semant.h
+
 struct type_env_t {
     SymbolTable<Symbol, Symbol> *om; // Object mapping O
     SymbolTable<Symbol, Symbol> *mm; // Method mapping M
-    SymbolTable<Symbol, Symbol> *cm; // Self class C
+    Class_ curr;                     // Current class  C
+    ClassTable *ct;
 };
 
 // define the class for phylum

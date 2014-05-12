@@ -253,7 +253,7 @@ void ClassTable::validate() {
             }
             else if (inheritance_graph.count(parent) == 0) {
                 // Error - parent not found
-                ostream &err_stream = semant_error(symbol_map[child]);
+                ostream& err_stream = semant_error(symbol_map[child]);
                 err_stream << "Class " << child << " inherits from undefined class " << parent << ".\n";
                 break;
             }
@@ -262,6 +262,43 @@ void ClassTable::validate() {
             }
         }
     } 
+}
+
+/*
+ * Returns the least upper bound (least common ancestor)
+ * of classes class1 and class2) in the inheritance graph.
+ * This is a naive O(N^2) algorithm where N is the branch
+ * length.
+ */
+Symbol ClassTable::lub(Symbol class1, Symbol class2) {
+    Symbol c1 = class1;
+    Symbol c2 = class2;
+    Symbol parent = Object;
+    while (c1 != Object) {
+        while (c2 != Object) {
+            if (c1 == c2) {
+                parent = c1;
+                goto finish;
+            }
+            c2 = inheritance_graph[c2];
+        }
+    }
+    finish:
+        return parent;
+}
+
+/*
+ * Returns true if child is a subclass of parent, false otherwise.
+ * This is an O(N) algorithm where N is the branch length.
+ */
+bool ClassTable::isChild(Symbol child, Symbol parent) {
+    Symbol c1 = child;
+    while (child != Object) {
+        if (child == parent)
+            return true;
+        child = inheritance_graph[child];
+    }
+    return false;
 }
 
 /*   This is the entry point to the semantic checker.
@@ -289,11 +326,13 @@ void program_class::semant()
     type_env_t env;
     env.om = new SymbolTable<Symbol, Symbol>();
     env.mm = new SymbolTable<Symbol, Symbol>();
-    env.cm = new SymbolTable<Symbol, Symbol>();
+    env.curr = NULL;
+    env.ct = classtable;
 
     /* Perform a top-down traversal to fill out the symbol table and then
        a bottom-up traversal to type-check. */
     for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
+        env.curr = classes->nth(i);
         classes->nth(i)->type_check(env);
     }
 
@@ -345,21 +384,25 @@ Feature method_class::type_check(type_env_t env) {
 
 Feature attr_class::type_check(type_env_t env) {
     env.om->addid(name, &type_decl);
-    init->type_check(env);
+    init->type_check(env)->type;
     return this;
 }
 
 Formal formal_class::type_check(type_env_t env) {
+    env.om->addid(name, &type_decl);
     return this;
 }
 
 Case branch_class::type_check(type_env_t env) {
+    env.om->addid(name, &type_decl);
     expr->type_check(env);
     return this;
 }
 
 Expression assign_class::type_check(type_env_t env) {
-    expr->type_check(env);
+    Symbol t1 = *env.om->lookup(name);
+    Symbol t2 = expr->type_check(env)->type;
+    type = t2;
     return this;
 }
 
@@ -380,15 +423,17 @@ Expression dispatch_class::type_check(type_env_t env) {
 }
 
 Expression cond_class::type_check(type_env_t env) {
-    pred->type_check(env);
-    then_exp->type_check(env);
-    else_exp->type_check(env);
+    Symbol t1 = pred->type_check(env)->type;
+    Symbol t2 = then_exp->type_check(env)->type;
+    Symbol t3 = else_exp->type_check(env)->type;
+    type = env.ct->lub(t2, t2);
     return this;
 }
 
 Expression loop_class::type_check(type_env_t env) {
-    pred->type_check(env);
-    body->type_check(env);
+    Symbol t1 = pred->type_check(env)->type;
+    Symbol t2 = body->type_check(env)->type;
+    type = Object;
     return this;
 }
 
@@ -401,67 +446,88 @@ Expression typcase_class::type_check(type_env_t env) {
 }
 
 Expression block_class::type_check(type_env_t env) {
+    Symbol t1;
     for (int i = body->first(); body->more(i); i = body->next(i)) {
-        body->nth(i)->type_check(env);
+        t1 = body->nth(i)->type_check(env)->type;
     }
+    type = t1;
     return this;
 }
 
 Expression let_class::type_check(type_env_t env) {
-    init->type_check(env);
-    body->type_check(env);
+    Symbol t1 = init->type_check(env)->type;
+    env.om->addid(identifier, &type_decl);
+    Symbol t2 = body->type_check(env)->type;
+    type = t1;
     return this;
 }
 
 Expression plus_class::type_check(type_env_t env) {
-    e1->type_check(env);
-    e2->type_check(env);
+    Symbol t1 = e1->type_check(env)->type;
+    Symbol t2 = e2->type_check(env)->type;
+    if (t1 == Int && t2 == Int) {
+        type = Int;
+    }
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "non-Int arguments " << t1 << " + " << t2 << ".\n";
+        type = Object;
+    }
     return this;
 }
 
 Expression sub_class::type_check(type_env_t env) {
-    e1->type_check(env);
-    e2->type_check(env);
+    Symbol t1 = e1->type_check(env)->type;
+    Symbol t2 = e2->type_check(env)->type;
+    type = Int;
     return this;
 }
 
 Expression mul_class::type_check(type_env_t env) {
-    e1->type_check(env);
-    e2->type_check(env);
+    Symbol t1 = e1->type_check(env)->type;
+    Symbol t2 = e2->type_check(env)->type;
+    type = Int;
     return this;
 }
 
 Expression divide_class::type_check(type_env_t env) {
-    e1->type_check(env);
-    e2->type_check(env);
+    Symbol t1 = e1->type_check(env)->type;
+    Symbol t2 = e2->type_check(env)->type;
+    type = Int;
     return this;
 }
 
 Expression neg_class::type_check(type_env_t env) {
-    e1->type_check(env);
+    Symbol t1 = e1->type_check(env)->type;
+    type = Int;
     return this;
 }
 
 Expression lt_class::type_check(type_env_t env) {
-    e1->type_check(env);
-    e2->type_check(env);
+    Symbol t1 = e1->type_check(env)->type;
+    Symbol t2 = e2->type_check(env)->type;
+    type = Bool;
     return this;
 }
 
 Expression eq_class::type_check(type_env_t env) {
-    e1->type_check(env);
-    e2->type_check(env);
+    Symbol t1 = e1->type_check(env)->type;
+    Symbol t2 = e2->type_check(env)->type;
+    /* TODO: Comparison caveats */
+    type = Bool;
     return this;
 }
 
 Expression leq_class::type_check(type_env_t env) {
-    e1->type_check(env);
-    e2->type_check(env);
+    Symbol t1 = e1->type_check(env)->type;
+    Symbol t2 = e2->type_check(env)->type;
+    type = Bool;
     return this;
 }
 
 Expression comp_class::type_check(type_env_t env) {
-    e1->type_check(env);
+    Symbol t1 = e1->type_check(env)->type;
+    type = Bool;
     return this;
 }
 
@@ -481,11 +547,14 @@ Expression string_const_class::type_check(type_env_t env) {
 }
 
 Expression new__class::type_check(type_env_t env) {
+    /* TODO: SELF_TYPE case */
+    type = type_name;
     return this;
 }
 
 Expression isvoid_class::type_check(type_env_t env) {
-    e1->type_check(env);
+    Symbol t1 = e1->type_check(env)->type;
+    type = Bool;
     return this;
 }
 
@@ -494,6 +563,8 @@ Expression no_expr_class::type_check(type_env_t env) {
 }
 
 Expression object_class::type_check(type_env_t env) {
+    if (env.om->lookup(name) != NULL)
+        type = *(env.om->lookup(name));
     return this;
 }
 
