@@ -1,0 +1,87 @@
+#1
+_program
+  #1
+  _class
+    C
+    Object
+    "good.cl"
+    (
+    #1
+    _attr
+      a
+      Int
+      #1
+      _no_expr
+      : _no_type
+    #1
+    _attr
+      b
+      Bool
+      #1
+      _no_expr
+      : _no_type
+    #1
+    _method
+      init
+      #1
+      _formal
+        x
+        Int
+      #1
+      _formal
+        y
+        Bool
+      C
+      #1
+      _block
+        #1
+        _assign
+          a
+          #1
+          _object
+            x
+          : _no_type
+        : _no_type
+        #1
+        _assign
+          b
+          #1
+          _object
+            y
+          : _no_type
+        : _no_type
+        #1
+        _object
+          self
+        : _no_type
+      : _no_type
+    )
+  #1
+  _class
+    Main
+    Object
+    "good.cl"
+    (
+    #1
+    _method
+      main
+      C
+      #1
+      _dispatch
+        #1
+        _new
+          C
+        : _no_type
+        init
+        (
+        #1
+        _int
+          1
+        : _no_type
+        #1
+        _bool
+          1
+        : _no_type
+        )
+      : _no_type
+    )
