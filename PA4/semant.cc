@@ -95,17 +95,6 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
     for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
         classes->nth(i)->add_to_class_table(inheritance_graph, symbol_map);
     }
-
-    /* Print inheritance graph */
-    /*
-    for (std::map<Symbol, Symbol>::iterator iter = inheritance_graph.begin();
-         iter != inheritance_graph.end(); ++iter) {
-        cout << "<<<<<<\n";
-        dump_Symbol(cout, 0, iter->first);
-        dump_Symbol(cout, 0, iter->second);
-    }
-    cout << "<<<<<<\n";
-    */
 }
 
 void ClassTable::install_basic_classes() {
@@ -297,10 +286,15 @@ void program_class::semant()
     ClassTable *classtable = new ClassTable(classes);
     classtable->validate();
 
+    type_env_t env;
+    env.om = new SymbolTable<Symbol, Symbol>();
+    env.mm = new SymbolTable<Symbol, Symbol>();
+    env.cm = new SymbolTable<Symbol, Symbol>();
+
     /* Perform a top-down traversal to fill out the symbol table and then
        a bottom-up traversal to type-check. */
     for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
-        //classes->nth(i)->type_check();
+        classes->nth(i)->type_check(env);
     }
 
     /* some semantic analysis code may go here */
@@ -331,3 +325,175 @@ void class__class::add_to_class_table(std::map<Symbol, Symbol> &ct,
         //err_stream << "Class " << name << " is multiply defined.";
     }
 }
+
+Class_ class__class::type_check(type_env_t env) {
+    env.om->enterscope();
+    for (int i = features->first(); features->more(i); i = features->next(i)) {
+        features->nth(i)->type_check(env);
+    }
+    env.om->exitscope();
+    return this;
+}
+
+Feature method_class::type_check(type_env_t env) {
+    for (int i = formals->first(); formals->more(i); i = formals->next(i)) {
+        formals->nth(i)->type_check(env);
+    }
+    expr->type_check(env);
+    return this;
+}
+
+Feature attr_class::type_check(type_env_t env) {
+    env.om->addid(name, &type_decl);
+    init->type_check(env);
+    return this;
+}
+
+Formal formal_class::type_check(type_env_t env) {
+    return this;
+}
+
+Case branch_class::type_check(type_env_t env) {
+    expr->type_check(env);
+    return this;
+}
+
+Expression assign_class::type_check(type_env_t env) {
+    expr->type_check(env);
+    return this;
+}
+
+Expression static_dispatch_class::type_check(type_env_t env) {
+    expr->type_check(env);
+    for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
+        actual->nth(i)->type_check(env);
+    }
+    return this;
+}
+
+Expression dispatch_class::type_check(type_env_t env) {
+    expr->type_check(env);
+    for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
+        actual->nth(i)->type_check(env);
+    }
+    return this;
+}
+
+Expression cond_class::type_check(type_env_t env) {
+    pred->type_check(env);
+    then_exp->type_check(env);
+    else_exp->type_check(env);
+    return this;
+}
+
+Expression loop_class::type_check(type_env_t env) {
+    pred->type_check(env);
+    body->type_check(env);
+    return this;
+}
+
+Expression typcase_class::type_check(type_env_t env) {
+    expr->type_check(env);
+    for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
+        cases->nth(i)->type_check(env);
+    }
+    return this;
+}
+
+Expression block_class::type_check(type_env_t env) {
+    for (int i = body->first(); body->more(i); i = body->next(i)) {
+        body->nth(i)->type_check(env);
+    }
+    return this;
+}
+
+Expression let_class::type_check(type_env_t env) {
+    init->type_check(env);
+    body->type_check(env);
+    return this;
+}
+
+Expression plus_class::type_check(type_env_t env) {
+    e1->type_check(env);
+    e2->type_check(env);
+    return this;
+}
+
+Expression sub_class::type_check(type_env_t env) {
+    e1->type_check(env);
+    e2->type_check(env);
+    return this;
+}
+
+Expression mul_class::type_check(type_env_t env) {
+    e1->type_check(env);
+    e2->type_check(env);
+    return this;
+}
+
+Expression divide_class::type_check(type_env_t env) {
+    e1->type_check(env);
+    e2->type_check(env);
+    return this;
+}
+
+Expression neg_class::type_check(type_env_t env) {
+    e1->type_check(env);
+    return this;
+}
+
+Expression lt_class::type_check(type_env_t env) {
+    e1->type_check(env);
+    e2->type_check(env);
+    return this;
+}
+
+Expression eq_class::type_check(type_env_t env) {
+    e1->type_check(env);
+    e2->type_check(env);
+    return this;
+}
+
+Expression leq_class::type_check(type_env_t env) {
+    e1->type_check(env);
+    e2->type_check(env);
+    return this;
+}
+
+Expression comp_class::type_check(type_env_t env) {
+    e1->type_check(env);
+    return this;
+}
+
+Expression int_const_class::type_check(type_env_t env) {
+    type = Int;
+    return this;
+}
+
+Expression bool_const_class::type_check(type_env_t env) {
+    type = Bool;
+    return this;
+}
+
+Expression string_const_class::type_check(type_env_t env) {
+    type = Str;
+    return this;
+}
+
+Expression new__class::type_check(type_env_t env) {
+    return this;
+}
+
+Expression isvoid_class::type_check(type_env_t env) {
+    e1->type_check(env);
+    return this;
+}
+
+Expression no_expr_class::type_check(type_env_t env) {
+    return this;
+}
+
+Expression object_class::type_check(type_env_t env) {
+    return this;
+}
+

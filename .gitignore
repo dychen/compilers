@@ -7,3 +7,6 @@
 *.unfilt
 parser
 lexer
+semant
+grading/RESULTS
+grading/SCORE

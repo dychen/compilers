@@ -14,7 +14,6 @@
 	-1 (badwhilebody)	 While body has error
 	-1 (badwhilecond)	 While test has error
 	-1 (basic)	 Simple program with a sequence of expressions
-	-1 (basicclassestree)	 Test of inheritance tree (Object as ansestor of everything)
 	-1 (caseidenticalbranch)	 Duplicate branch in a case expr
 	-1 (cells)	 Complex program
 	-1 (classes)	 Various classes with inheritance and overriding (legal)
@@ -24,10 +23,8 @@
 	-1 (dispatch)	 Simple dispatches
 	-1 (dupformals)	 Duplicate name in formal param list
 	-1 (expressionblock)	 Simple expression block (i.e. list)
-	-1 (forwardinherits)	 Forward declaration in inherits clause (legal)
 	-1 (hairyscary)	 Messy legal Cool program
 	-1 (if)	 If statement
-	-1 (inheritsObject)	 Class explicitly inherits Object (legal)
 	-1 (inheritsbool)	 Class inherits Bool (illegal)
 	-1 (inheritsstring)	 Class inherits String (illegal)
 	-1 (initwithself)	 Attribute initialized with self (legal)
@@ -48,10 +45,8 @@
 	-1 (nomain)	 Missing Main class
 	-1 (objectdispatchabort)	 Calling abort() method on an object
 	-1 (outofscope)	 Using a name that exists but is out of scope
-	-1 (overridingmethod)	 Overriding parent class's method
 	-1 (overridingmethod2)	 Another method override example
 	-1 (overridingmethod3)	 Method override example with SELF_TYPE
-	-1 (overriderenamearg)	 Overriding parent's method with new param names (legal)
 	-1 (overridingmethod4)	 Illegal method override - different param types
 	-1 (signaturechange)	 Method override with different number of params
 	-1 (redefinedclass)	 Redefinition of a class (illegal)
