@@ -197,10 +197,25 @@ void ClassTable::install_basic_classes(type_env_t env) {
 						      no_expr()))),
 	       filename);
 
-    env.mm[Object] = Object_class;
-    env.mm[IO] = IO_class;
-    env.mm[Int] = Int_class;
-    env.mm[Str] = Str_class;
+    // Object class
+    env.mm[std::make_pair(Object, cool_abort)] = std::make_pair(nil_Formals(), Object);
+    env.mm[std::make_pair(Object, type_name)] = std::make_pair(nil_Formals(), Str);
+    env.mm[std::make_pair(Object, copy)] = std::make_pair(nil_Formals(), SELF_TYPE);
+    // IO class
+    env.mm[std::make_pair(IO, out_string)] = std::make_pair(single_Formals(formal(arg, Str)), SELF_TYPE);
+    env.mm[std::make_pair(IO, out_int)] = std::make_pair(single_Formals(formal(arg, Int)), SELF_TYPE);
+    env.mm[std::make_pair(IO, in_string)] = std::make_pair(nil_Formals(), Str);
+    env.mm[std::make_pair(IO, in_int)] = std::make_pair(nil_Formals(), Int);
+    // Int class
+    env.om->addid(val, &prim_slot);
+    // Bool class
+    env.om->addid(val, &prim_slot);
+    // String class
+    env.om->addid(val, &Int);
+    env.om->addid(str_field, &prim_slot);
+    env.mm[std::make_pair(Str, length)] = std::make_pair(nil_Formals(), Int);
+    env.mm[std::make_pair(Str, concat)] = std::make_pair(single_Formals(formal(arg, Str)), Str);
+    env.mm[std::make_pair(Str, substr)] = std::make_pair(append_Formals(single_Formals(formal(arg, Int)), single_Formals(formal(arg2, Int))), Str);
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -333,14 +348,14 @@ void program_class::semant()
 
     type_env_t env;
     env.om = new SymbolTable<Symbol, Symbol>();
-    //env.mm = new std::map<Symbol, Symbol>();
     env.curr = NULL;
     env.ct = classtable;
 
+    env.om->enterscope();
     env.ct->install_basic_classes(env);
     for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
         env.curr = classes->nth(i);
-        env.mm[classes->nth(i)->get_name()] = classes->nth(i);
+        //env.mm[classes->nth(i)->get_name()] = classes->nth(i);
         classes->nth(i)->init_class(env);
     }
 
@@ -350,6 +365,7 @@ void program_class::semant()
         env.curr = classes->nth(i);
         classes->nth(i)->type_check(env);
     }
+    env.om->exitscope();
 
     /* some semantic analysis code may go here */
 
@@ -394,10 +410,11 @@ void class__class::init_class(type_env_t env) {
 }
 
 void method_class::add_to_environment(type_env_t env) {
+    env.mm[std::make_pair(env.curr->get_name(), name)] = std::make_pair(formals, return_type);
 }
 
 void attr_class::add_to_environment(type_env_t env) {
-    //env.om->addid(name, &type_decl);
+    env.om->addid(name, &type_decl);
 }
 
 Class_ class__class::type_check(type_env_t env) {
@@ -504,8 +521,19 @@ Expression dispatch_class::type_check(type_env_t env) {
     for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
         param_types.push_back(actual->nth(i)->type_check(env)->type);
     }
-    Class_ curr_class = env.mm[curr];
-    //curr_class->check_formals(param_types);
+
+    // Need to check if key exists?
+    Formals formals = env.mm.find(std::make_pair(curr, name))->second.first;
+    Symbol ret_type = env.mm.find(std::make_pair(curr, name))->second.second;
+    for (std::vector<Symbol>::iterator iter = param_types.begin(); iter != param_types.end(); ++iter) {
+        Symbol param_type = *iter;
+        // Check formals
+    }
+    if (ret_type == SELF_TYPE)
+        type = t0;
+    else
+        type = ret_type;
+        type = t0;
     return this;
 }
 

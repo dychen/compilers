@@ -12,14 +12,17 @@
 #include "tree.h"
 #include "cool-tree.handcode.h"
 #include <map>
+#include <utility> // For std::pair
 #include <vector>
 #include <symtab.h>
 
 class ClassTable; // Defined in semant.h
+typedef std::pair<Symbol, Symbol> class_method_pair;
+typedef std::pair<Formals, Symbol> formals_return_pair;
 
 struct type_env_t {
     SymbolTable<Symbol, Symbol> *om; // Object mapping O
-    std::map<Symbol, Class_>     mm; // Method mapping M
+    std::map<class_method_pair, formals_return_pair> mm; // Method mapping M
     Class_ curr;                     // Current class  C
     ClassTable *ct;
 };
