@@ -97,7 +97,7 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
     }
 }
 
-void ClassTable::install_basic_classes() {
+void ClassTable::install_basic_classes(type_env_t env) {
 
     // The tree package uses these globals to annotate the classes built below.
    // curr_lineno  = 0;
@@ -196,6 +196,11 @@ void ClassTable::install_basic_classes() {
 						      Str, 
 						      no_expr()))),
 	       filename);
+
+    env.mm[Object] = Object_class;
+    env.mm[IO] = IO_class;
+    env.mm[Int] = Int_class;
+    env.mm[Str] = Str_class;
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -282,6 +287,7 @@ Symbol ClassTable::lub(Symbol class1, Symbol class2) {
             }
             c2 = inheritance_graph[c2];
         }
+        c1 = inheritance_graph[c1];
     }
     finish:
         return parent;
@@ -291,12 +297,14 @@ Symbol ClassTable::lub(Symbol class1, Symbol class2) {
  * Returns true if child is a subclass of parent, false otherwise.
  * This is an O(N) algorithm where N is the branch length.
  */
-bool ClassTable::isChild(Symbol child, Symbol parent) {
-    Symbol c1 = child;
-    while (child != Object) {
-        if (child == parent)
+bool ClassTable::is_child(Symbol child, Symbol parent) {
+    Symbol c = child;
+    if (parent == Object)
+        return true;
+    while (c != Object) {
+        if (c == parent)
             return true;
-        child = inheritance_graph[child];
+        c = inheritance_graph[c];
     }
     return false;
 }
@@ -325,9 +333,16 @@ void program_class::semant()
 
     type_env_t env;
     env.om = new SymbolTable<Symbol, Symbol>();
-    env.mm = new SymbolTable<Symbol, Symbol>();
+    //env.mm = new std::map<Symbol, Symbol>();
     env.curr = NULL;
     env.ct = classtable;
+
+    env.ct->install_basic_classes(env);
+    for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
+        env.curr = classes->nth(i);
+        env.mm[classes->nth(i)->get_name()] = classes->nth(i);
+        classes->nth(i)->init_class(env);
+    }
 
     /* Perform a top-down traversal to fill out the symbol table and then
        a bottom-up traversal to type-check. */
@@ -365,6 +380,26 @@ void class__class::add_to_class_table(std::map<Symbol, Symbol> &ct,
     }
 }
 
+Symbol class__class::get_name() {
+    return name;
+}
+
+/*
+ * Initializes environment tables with class attributes and methods.
+ */
+void class__class::init_class(type_env_t env) {
+    for (int i = features->first(); features->more(i); i = features->next(i)) {
+        features->nth(i)->add_to_environment(env);
+    }
+}
+
+void method_class::add_to_environment(type_env_t env) {
+}
+
+void attr_class::add_to_environment(type_env_t env) {
+    //env.om->addid(name, &type_decl);
+}
+
 Class_ class__class::type_check(type_env_t env) {
     env.om->enterscope();
     for (int i = features->first(); features->more(i); i = features->next(i)) {
@@ -375,16 +410,56 @@ Class_ class__class::type_check(type_env_t env) {
 }
 
 Feature method_class::type_check(type_env_t env) {
+    // This assumes the method is already in the method map.
+    // Doesn't check for inheritance.
+    env.om->enterscope();
+    Symbol curr_class = env.curr->get_name();
+    env.om->addid(self, &curr_class);
     for (int i = formals->first(); formals->more(i); i = formals->next(i)) {
         formals->nth(i)->type_check(env);
     }
-    expr->type_check(env);
+    Symbol tret = expr->type_check(env)->type;
+    // If return type is SELF_TYPE
+    if (return_type == SELF_TYPE) {
+        if (env.ct->is_child(tret, curr_class)) {}
+        else {
+            ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+            err_stream << "Method initialization " << tret << " is not a subclass of " << curr_class << ".\n";
+        }
+    }
+    // Otherwise
+    else {
+        if (env.ct->is_child(tret, return_type)) {}
+        else {
+            ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+            err_stream << "Method initialization " << tret << " is not a subclass of " << return_type << ".\n";
+        }
+    }
+    env.om->exitscope();
     return this;
 }
 
 Feature attr_class::type_check(type_env_t env) {
     env.om->addid(name, &type_decl);
-    init->type_check(env)->type;
+    env.om->enterscope();
+    Symbol curr_class = env.curr->get_name();
+    env.om->addid(self, &curr_class);
+    Symbol t1 = init->type_check(env)->type;
+    env.om->exitscope();
+    // No init
+    if (t1 == No_type) {
+        // Nothing to do?
+    }
+    // With init
+    else {
+        if (env.ct->is_child(t1, type_decl)) {
+            // Nothing to do?
+        }
+        else {
+            ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+            err_stream << "Attribute initialization " << t1 << " is not a subclass of " << type_decl << ".\n";
+        }
+    }
     return this;
 }
 
@@ -393,21 +468,25 @@ Formal formal_class::type_check(type_env_t env) {
     return this;
 }
 
-Case branch_class::type_check(type_env_t env) {
+Symbol branch_class::type_check(type_env_t env) {
     env.om->addid(name, &type_decl);
-    expr->type_check(env);
-    return this;
+    return expr->type_check(env)->type;
 }
 
 Expression assign_class::type_check(type_env_t env) {
     Symbol t1 = *env.om->lookup(name);
     Symbol t2 = expr->type_check(env)->type;
-    type = t2;
+    if (env.ct->is_child(t2, t1))
+        type = t2;
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << t2 << " is not a subclass of " << t1 << ".\n";
+    }
     return this;
 }
 
 Expression static_dispatch_class::type_check(type_env_t env) {
-    expr->type_check(env);
+    Symbol t0 = expr->type_check(env)->type;
     for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
         actual->nth(i)->type_check(env);
     }
@@ -415,10 +494,18 @@ Expression static_dispatch_class::type_check(type_env_t env) {
 }
 
 Expression dispatch_class::type_check(type_env_t env) {
-    expr->type_check(env);
+    std::vector<Symbol> param_types;
+    Symbol curr;
+    Symbol t0 = expr->type_check(env)->type;
+    if (t0 == SELF_TYPE) // Should this be SELF_TYPE???
+        curr = env.curr->get_name();
+    else
+        curr = t0;
     for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
-        actual->nth(i)->type_check(env);
+        param_types.push_back(actual->nth(i)->type_check(env)->type);
     }
+    Class_ curr_class = env.mm[curr];
+    //curr_class->check_formals(param_types);
     return this;
 }
 
@@ -426,22 +513,40 @@ Expression cond_class::type_check(type_env_t env) {
     Symbol t1 = pred->type_check(env)->type;
     Symbol t2 = then_exp->type_check(env)->type;
     Symbol t3 = else_exp->type_check(env)->type;
-    type = env.ct->lub(t2, t2);
+    if (t1 == Bool)
+        type = env.ct->lub(t1, t2);
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "If condition did not evaluate to a boolean.\n";
+        type = Object;
+    }
     return this;
 }
 
 Expression loop_class::type_check(type_env_t env) {
     Symbol t1 = pred->type_check(env)->type;
     Symbol t2 = body->type_check(env)->type;
-    type = Object;
+    if (t1 == Bool)
+        type = Object;
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "While condition did not evaluate to a boolean.\n";
+        type = Object;
+    }
     return this;
 }
 
 Expression typcase_class::type_check(type_env_t env) {
-    expr->type_check(env);
+    Symbol t0 = expr->type_check(env)->type;
+    // Warning: The following typechecks the first case twice.
+    //          Might need to change this.
+    Symbol tn = cases->nth(cases->first())->type_check(env);
     for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
-        cases->nth(i)->type_check(env);
+        env.om->enterscope();
+        tn = env.ct->lub(tn, cases->nth(i)->type_check(env));
+        env.om->exitscope();
     }
+    type = tn;
     return this;
 }
 
@@ -455,19 +560,43 @@ Expression block_class::type_check(type_env_t env) {
 }
 
 Expression let_class::type_check(type_env_t env) {
+    Symbol t0;
+    if (type_decl == SELF_TYPE)
+        t0 = env.curr->get_name();
+    else
+        t0 = type_decl;
     Symbol t1 = init->type_check(env)->type;
-    env.om->addid(identifier, &type_decl);
-    Symbol t2 = body->type_check(env)->type;
-    type = t1;
+    // No init
+    if (t1 == No_type) {
+        env.om->enterscope();
+        env.om->addid(identifier, &t0);
+        Symbol t2 = body->type_check(env)->type;
+        env.om->exitscope();
+        type = t2;
+    }
+    // With init
+    else {
+        if (env.ct->is_child(t1, t0)) {
+            env.om->enterscope();
+            env.om->addid(identifier, &t0);
+            Symbol t2 = body->type_check(env)->type;
+            env.om->exitscope();
+            type = t2;
+        }
+        else {
+            ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+            err_stream << "Expression must evaluate to a child of " << t0 << "\n.";
+            type = Object;
+        }
+    }
     return this;
 }
 
 Expression plus_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
     Symbol t2 = e2->type_check(env)->type;
-    if (t1 == Int && t2 == Int) {
+    if (t1 == Int && t2 == Int)
         type = Int;
-    }
     else {
         ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
         err_stream << "non-Int arguments " << t1 << " + " << t2 << ".\n";
@@ -479,55 +608,102 @@ Expression plus_class::type_check(type_env_t env) {
 Expression sub_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
     Symbol t2 = e2->type_check(env)->type;
-    type = Int;
+    if (t1 == Int && t2 == Int)
+        type = Int;
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "non-Int arguments " << t1 << " - " << t2 << ".\n";
+        type = Object;
+    }
     return this;
 }
 
 Expression mul_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
     Symbol t2 = e2->type_check(env)->type;
-    type = Int;
+    if (t1 == Int && t2 == Int)
+        type = Int;
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "non-Int arguments " << t1 << " * " << t2 << ".\n";
+        type = Object;
+    }
     return this;
 }
 
 Expression divide_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
     Symbol t2 = e2->type_check(env)->type;
-    type = Int;
+    if (t1 == Int && t2 == Int)
+        type = Int;
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "non-Int arguments " << t1 << " / " << t2 << ".\n";
+        type = Object;
+    }
     return this;
 }
 
 Expression neg_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
-    type = Int;
+    if (t1 == Int)
+        type = Int;
+    else {
+        ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "non-Int argument ~" << t1 << ".\n";
+        type = Object;
+    }
     return this;
 }
 
 Expression lt_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
     Symbol t2 = e2->type_check(env)->type;
-    type = Bool;
+    if (t1 == Int && t2 == Int)
+        type = Bool;
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "non-Int arguments " << t1 << " < " << t2 << ".\n";
+        type = Object;
+    }
     return this;
 }
 
 Expression eq_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
     Symbol t2 = e2->type_check(env)->type;
-    /* TODO: Comparison caveats */
-    type = Bool;
+    if ((t1 == Int && t2 == Int) || (t1 == Str && t2 == Str) || (t1 == Bool && t2 == Bool))
+        type = Bool;
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "non-Int arguments " << t1 << " = " << t2 << ".\n";
+        type = Object;
+    }
     return this;
 }
 
 Expression leq_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
     Symbol t2 = e2->type_check(env)->type;
-    type = Bool;
+    if (t1 == Int && t2 == Int)
+        type = Bool;
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "non-Int arguments " << t1 << " <= " << t2 << ".\n";
+        type = Object;
+    }
     return this;
 }
 
 Expression comp_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
-    type = Bool;
+    if (t1 == Bool)
+        type = Bool;
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "non-Bool argument !" << t1 << ".\n";
+        type = Object;
+    }
     return this;
 }
 
@@ -547,8 +723,10 @@ Expression string_const_class::type_check(type_env_t env) {
 }
 
 Expression new__class::type_check(type_env_t env) {
-    /* TODO: SELF_TYPE case */
-    type = type_name;
+    if (type_name == SELF_TYPE)
+        type = env.curr->get_name();
+    else
+        type = type_name;
     return this;
 }
 
@@ -559,6 +737,7 @@ Expression isvoid_class::type_check(type_env_t env) {
 }
 
 Expression no_expr_class::type_check(type_env_t env) {
+    type = No_type;
     return this;
 }
 

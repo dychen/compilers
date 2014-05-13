@@ -12,13 +12,14 @@
 #include "tree.h"
 #include "cool-tree.handcode.h"
 #include <map>
+#include <vector>
 #include <symtab.h>
 
 class ClassTable; // Defined in semant.h
 
 struct type_env_t {
     SymbolTable<Symbol, Symbol> *om; // Object mapping O
-    SymbolTable<Symbol, Symbol> *mm; // Method mapping M
+    std::map<Symbol, Class_>     mm; // Method mapping M
     Class_ curr;                     // Current class  C
     ClassTable *ct;
 };
@@ -48,6 +49,8 @@ public:
     virtual Class_ type_check(type_env_t env) = 0;
     virtual void add_to_class_table(std::map<Symbol, Symbol> &ct,
                                     std::map<Symbol, Class_> &sm) = 0;
+    virtual void init_class(type_env_t env) = 0;
+    virtual Symbol get_name() = 0;
 
 #ifdef Class__EXTRAS
    Class__EXTRAS
@@ -63,6 +66,7 @@ public:
    tree_node *copy()		 { return copy_Feature(); }
    virtual Feature copy_Feature() = 0;
     virtual Feature type_check(type_env_t env) = 0;
+    virtual void add_to_environment(type_env_t env) = 0;
 
 #ifdef Feature_EXTRAS
    Feature_EXTRAS
@@ -107,7 +111,7 @@ class Case_class : public tree_node {
 public:
    tree_node *copy()		 { return copy_Case(); }
    virtual Case copy_Case() = 0;
-    virtual Case type_check(type_env_t env) = 0;
+    virtual Symbol type_check(type_env_t env) = 0;
 
 #ifdef Case_EXTRAS
    Case_EXTRAS
@@ -181,6 +185,8 @@ public:
     Class_ type_check(type_env_t env);
     void add_to_class_table(std::map<Symbol, Symbol> &ct,
                             std::map<Symbol, Class_> &sm);
+    void init_class(type_env_t env);
+    Symbol get_name();
 
 #ifdef Class__SHARED_EXTRAS
    Class__SHARED_EXTRAS
@@ -208,6 +214,7 @@ public:
    Feature copy_Feature();
    void dump(ostream& stream, int n);
     Feature type_check(type_env_t env);
+    void add_to_environment(type_env_t env);
 
 #ifdef Feature_SHARED_EXTRAS
    Feature_SHARED_EXTRAS
@@ -233,6 +240,7 @@ public:
    Feature copy_Feature();
    void dump(ostream& stream, int n);
     Feature type_check(type_env_t env);
+    void add_to_environment(type_env_t env);
 
 #ifdef Feature_SHARED_EXTRAS
    Feature_SHARED_EXTRAS
@@ -280,7 +288,7 @@ public:
    }
    Case copy_Case();
    void dump(ostream& stream, int n);
-    Case type_check(type_env_t env);
+    Symbol type_check(type_env_t env);
 
 #ifdef Case_SHARED_EXTRAS
    Case_SHARED_EXTRAS
