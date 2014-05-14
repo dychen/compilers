@@ -476,7 +476,7 @@ void attr_class::add_to_environment(type_env_t env) {
 }
 
 Class_ class__class::type_check(type_env_t env) {
-    //cout << "Starting type check for class " << name << ".\n";
+    cout << "Starting type check for class " << name << ".\n";
     for (int i = features->first(); features->more(i); i = features->next(i)) {
         features->nth(i)->type_check(env);
     }
@@ -484,7 +484,7 @@ Class_ class__class::type_check(type_env_t env) {
 }
 
 Feature method_class::type_check(type_env_t env) {
-    //cout << "Type checking method " << name << ".\n";
+    cout << "Type checking method " << name << ".\n";
     // This assumes the method is already in the method map.
     // Doesn't check for inheritance.
     env.om->enterscope();
@@ -515,7 +515,7 @@ Feature method_class::type_check(type_env_t env) {
 }
 
 Feature attr_class::type_check(type_env_t env) {
-    //cout << "Type checking attribute " << name << ".\n";
+    cout << "Type checking attribute " << name << ".\n";
 //    env.om->addid(name, &type_decl);
     env.om->enterscope();
     Symbol curr_class = env.curr->get_name();
@@ -542,8 +542,12 @@ Feature attr_class::type_check(type_env_t env) {
 }
 
 Formal formal_class::type_check(type_env_t env) {
-    //cout << "Type checking formal " << name << ".\n";
-    env.om->addid(name, &type_decl);
+    if (env.om->probe(name) == NULL)
+        env.om->addid(name, &type_decl);
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "Duplicate formal " << name << ".\n";
+    }
     return this;
 }
 
@@ -553,22 +557,27 @@ Symbol branch_class::type_check(type_env_t env) {
 }
 
 Expression assign_class::type_check(type_env_t env) {
-    //cout << "In assign_class\n";
+    cout << "In assign_class\n";
     Symbol t1 = *env.om->lookup(name);
     Symbol t2 = expr->type_check(env)->type;
-    if (env.ct->is_child(t2, t1))
+    if (t2 == SELF_TYPE) {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "Cannot assign to 'self'.\n";
+        type = Object;
+    }
+    else if (env.ct->is_child(t2, t1))
         type = t2;
     else {
         ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
         err_stream << t2 << " is not a subclass of " << t1 << ".\n";
+        type = Object;
     }
     return this;
 }
 
 Expression static_dispatch_class::type_check(type_env_t env) {
-     //cout << "In static_dispatch_class\n";
+    cout << "In static_dispatch_class\n";
     std::vector<Symbol> param_types;
-    Symbol curr;
     Symbol t0 = expr->type_check(env)->type;
     if (t0 == SELF_TYPE)
         t0 = env.curr->get_name();
@@ -582,7 +591,10 @@ Expression static_dispatch_class::type_check(type_env_t env) {
             Symbol param_type = *iter;
             // TODO: Check formals
         }
-        type = ret_type;
+        if (ret_type == SELF_TYPE)
+            type = t0;
+        else
+            type = ret_type;
     }
     else {
         ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
@@ -594,26 +606,31 @@ Expression static_dispatch_class::type_check(type_env_t env) {
 }
 
 Expression dispatch_class::type_check(type_env_t env) {
-    //cout << "In dispatch_class\n";
+    cout << "In dispatch_class\n";
     std::vector<Symbol> param_types;
-    Symbol curr;
     Symbol t0 = expr->type_check(env)->type;
+    Symbol curr = t0;
     if (t0 == SELF_TYPE)
-        t0 = env.curr->get_name();
+        curr = env.curr->get_name();
     for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
         param_types.push_back(actual->nth(i)->type_check(env)->type);
     }
-    Formals formals = env.ct->get_formals(t0, name);
-    Symbol ret_type = env.ct->get_return_type(t0, name);
+    Formals formals = env.ct->get_formals(curr, name);
+    Symbol ret_type = env.ct->get_return_type(curr, name);
+    cout << "Return type: " << ret_type << "\n";
     for (std::vector<Symbol>::iterator iter = param_types.begin(); iter != param_types.end(); ++iter) {
         Symbol param_type = *iter;
         // TODO: Check formals
     }
-    type = ret_type;
+    if (ret_type == SELF_TYPE)
+        type = t0;    
+    else
+        type = ret_type;
     return this;
 }
 
 Expression cond_class::type_check(type_env_t env) {
+    cout << "In cond_class\n";
     Symbol t1 = pred->type_check(env)->type;
     Symbol t2 = then_exp->type_check(env)->type;
     Symbol t3 = else_exp->type_check(env)->type;
@@ -628,6 +645,7 @@ Expression cond_class::type_check(type_env_t env) {
 }
 
 Expression loop_class::type_check(type_env_t env) {
+    cout << "In loop_class\n";
     Symbol t1 = pred->type_check(env)->type;
     Symbol t2 = body->type_check(env)->type;
     if (t1 == Bool)
@@ -641,6 +659,7 @@ Expression loop_class::type_check(type_env_t env) {
 }
 
 Expression typcase_class::type_check(type_env_t env) {
+    cout << "In typecase_class\n";
     Symbol t0 = expr->type_check(env)->type;
     // Warning: The following typechecks the first case twice.
     //          Might need to change this.
@@ -655,6 +674,7 @@ Expression typcase_class::type_check(type_env_t env) {
 }
 
 Expression block_class::type_check(type_env_t env) {
+    cout << "In block_class\n";
     Symbol t1;
     for (int i = body->first(); body->more(i); i = body->next(i)) {
         t1 = body->nth(i)->type_check(env)->type;
@@ -664,6 +684,7 @@ Expression block_class::type_check(type_env_t env) {
 }
 
 Expression let_class::type_check(type_env_t env) {
+    cout << "In let_class\n";
     Symbol t0;
     if (type_decl == SELF_TYPE)
         t0 = env.curr->get_name();
@@ -850,8 +871,11 @@ Expression object_class::type_check(type_env_t env) {
         type = SELF_TYPE;
     else if (env.om->lookup(name) != NULL)
         type = *(env.om->lookup(name));
-    else
-        cerr << "Could not find object " << name << " in object map.\n";
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "Could not find identifier " << name << " in current scope.\n";
+        type = Object;
+    }
     return this;
 }
 
