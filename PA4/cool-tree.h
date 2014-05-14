@@ -21,10 +21,12 @@ typedef std::pair<Symbol, Symbol> class_method_pair;
 typedef std::pair<Formals, Symbol> formals_return_pair;
 
 struct type_env_t {
-    SymbolTable<Symbol, Symbol> *om; // Object mapping O
-    std::map<class_method_pair, formals_return_pair> mm; // Method mapping M
-    Class_ curr;                     // Current class  C
+    // Object map O<id name, id type>
+    SymbolTable<Symbol, Symbol> *om;
+    // Contains the class map and inheritance graph M
     ClassTable *ct;
+    // Current class C
+    Class_ curr;
 };
 
 // define the class for phylum
@@ -54,6 +56,8 @@ public:
                                     std::map<Symbol, Class_> &sm) = 0;
     virtual void init_class(type_env_t env) = 0;
     virtual Symbol get_name() = 0;
+    virtual Formals get_formals(Symbol method) = 0;
+    virtual Symbol get_return_type(Symbol method) = 0;
 
 #ifdef Class__EXTRAS
    Class__EXTRAS
@@ -70,6 +74,10 @@ public:
    virtual Feature copy_Feature() = 0;
     virtual Feature type_check(type_env_t env) = 0;
     virtual void add_to_environment(type_env_t env) = 0;
+    virtual bool is_method() = 0;
+    virtual Formals get_formals() = 0;
+    virtual Symbol get_return_type() = 0;
+    virtual Symbol get_name() = 0;
 
 #ifdef Feature_EXTRAS
    Feature_EXTRAS
@@ -190,6 +198,8 @@ public:
                             std::map<Symbol, Class_> &sm);
     void init_class(type_env_t env);
     Symbol get_name();
+    Formals get_formals(Symbol method);
+    Symbol get_return_type(Symbol method);
 
 #ifdef Class__SHARED_EXTRAS
    Class__SHARED_EXTRAS
@@ -218,6 +228,10 @@ public:
    void dump(ostream& stream, int n);
     Feature type_check(type_env_t env);
     void add_to_environment(type_env_t env);
+    bool is_method();
+    Formals get_formals();
+    Symbol get_return_type();
+    Symbol get_name();
 
 #ifdef Feature_SHARED_EXTRAS
    Feature_SHARED_EXTRAS
@@ -244,7 +258,10 @@ public:
    void dump(ostream& stream, int n);
     Feature type_check(type_env_t env);
     void add_to_environment(type_env_t env);
-
+    bool is_method();
+    Formals get_formals();
+    Symbol get_return_type();
+    Symbol get_name();
 #ifdef Feature_SHARED_EXTRAS
    Feature_SHARED_EXTRAS
 #endif

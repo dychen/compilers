@@ -22,10 +22,10 @@ typedef ClassTable *ClassTableP;
 class ClassTable {
 private:
   int semant_errors;
-//  void install_basic_classes();
+  void install_basic_classes();
   ostream& error_stream;
-  std::map<Symbol, Class_> symbol_map;
-  std::map<Symbol, Symbol> inheritance_graph;
+  std::map<Symbol, Class_> class_map;        // Maps class names to the class pointers
+  std::map<Symbol, Symbol> inheritance_graph; // Maps child classes to parents
 
 public:
   ClassTable(Classes);
@@ -35,8 +35,10 @@ public:
   ostream& semant_error(Symbol filename, tree_node *t);
   void validate();
   Symbol lub(Symbol c1, Symbol c2);
+  Class_ get_class(Symbol class_name);
+  Formals get_formals(Symbol class_name, Symbol method_name);
+  Symbol get_return_type(Symbol class_name, Symbol method_name);
   bool is_child(Symbol child, Symbol parent);
-  void install_basic_classes(type_env_t env);
   void init_class(type_env_t env);
 };
 

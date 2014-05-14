@@ -85,19 +85,15 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
 
     /* Construct inheritance graph, a graph of <child, parent> class mappings */
     /* Add basic classes */
-    inheritance_graph[Object] = No_class;
-    inheritance_graph[Int] = Object;
-    inheritance_graph[IO] = Object;
-    inheritance_graph[Str] = Object;
-    inheritance_graph[Bool] = Object;
+    install_basic_classes();
 
     /* Add other classes */
     for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
-        classes->nth(i)->add_to_class_table(inheritance_graph, symbol_map);
+        classes->nth(i)->add_to_class_table(inheritance_graph, class_map);
     }
 }
 
-void ClassTable::install_basic_classes(type_env_t env) {
+void ClassTable::install_basic_classes() {
 
     // The tree package uses these globals to annotate the classes built below.
    // curr_lineno  = 0;
@@ -197,25 +193,11 @@ void ClassTable::install_basic_classes(type_env_t env) {
 						      no_expr()))),
 	       filename);
 
-    // Object class
-    env.mm[std::make_pair(Object, cool_abort)] = std::make_pair(nil_Formals(), Object);
-    env.mm[std::make_pair(Object, type_name)] = std::make_pair(nil_Formals(), Str);
-    env.mm[std::make_pair(Object, copy)] = std::make_pair(nil_Formals(), SELF_TYPE);
-    // IO class
-    env.mm[std::make_pair(IO, out_string)] = std::make_pair(single_Formals(formal(arg, Str)), SELF_TYPE);
-    env.mm[std::make_pair(IO, out_int)] = std::make_pair(single_Formals(formal(arg, Int)), SELF_TYPE);
-    env.mm[std::make_pair(IO, in_string)] = std::make_pair(nil_Formals(), Str);
-    env.mm[std::make_pair(IO, in_int)] = std::make_pair(nil_Formals(), Int);
-    // Int class
-    env.om->addid(val, &prim_slot);
-    // Bool class
-    env.om->addid(val, &prim_slot);
-    // String class
-    env.om->addid(val, &Int);
-    env.om->addid(str_field, &prim_slot);
-    env.mm[std::make_pair(Str, length)] = std::make_pair(nil_Formals(), Int);
-    env.mm[std::make_pair(Str, concat)] = std::make_pair(single_Formals(formal(arg, Str)), Str);
-    env.mm[std::make_pair(Str, substr)] = std::make_pair(append_Formals(single_Formals(formal(arg, Int)), single_Formals(formal(arg2, Int))), Str);
+    Object_class->add_to_class_table(inheritance_graph, class_map);
+    IO_class->add_to_class_table(inheritance_graph, class_map);
+    Int_class->add_to_class_table(inheritance_graph, class_map);
+    Bool_class->add_to_class_table(inheritance_graph, class_map);
+    Str_class->add_to_class_table(inheritance_graph, class_map);
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -267,13 +249,13 @@ void ClassTable::validate() {
         while (parent != No_class) {
             if (parent == child) {
                 // Error - cycle detected
-                ostream& err_stream = semant_error(symbol_map[child]);
+                ostream& err_stream = semant_error(class_map[child]);
                 err_stream << "Class " << child << " inherits from itself.\n";
                 break;
             }
             else if (inheritance_graph.count(parent) == 0) {
                 // Error - parent not found
-                ostream& err_stream = semant_error(symbol_map[child]);
+                ostream& err_stream = semant_error(class_map[child]);
                 err_stream << "Class " << child << " inherits from undefined class " << parent << ".\n";
                 break;
             }
@@ -306,6 +288,53 @@ Symbol ClassTable::lub(Symbol class1, Symbol class2) {
     }
     finish:
         return parent;
+}
+
+/*
+ * Returns the class pointer of the input class name.
+ */
+Class_ ClassTable::get_class(Symbol class_name) {
+    return class_map[class_name];
+}
+
+/*
+ * Traverses the inheritance chain of the input class until
+ * it finds a method matching the input method name and returns
+ * the corresponding formal parameters. Outputs an error and
+ * returns NULL if no matching method is found.
+ */
+Formals ClassTable::get_formals(Symbol class_name, Symbol method_name) {
+    Symbol cname = class_name;
+    while (class_name != No_class) {
+        //cout << "Getting formals for: " << cname << "." << method_name << "().\n";
+        Class_ c = class_map[cname];
+        Formals f = c->get_formals(method_name);
+        if (f != NULL)
+            return f;
+        cname = inheritance_graph[cname]; 
+    }
+    cerr << "No method " << method_name << " found for class " << class_name << "\n.";
+    return NULL;
+}
+
+/*
+ * Traverses the inheritance chain of the input class until
+ * it finds a method matching the input method name and returns
+ * the corresponding formal parameters. Outputs an error and
+ * returns NULL if no matching method is found.
+ */
+Symbol ClassTable::get_return_type(Symbol class_name, Symbol method_name) {
+    Symbol cname = class_name;
+    while (class_name != No_class) {
+        //cout << "Getting return type for: " << cname << "." << method_name << "().\n";
+        Class_ c = class_map[cname];
+        Symbol r = c->get_return_type(method_name);
+        if (r != NULL)
+            return r;
+        cname = inheritance_graph[cname];
+    }
+    cerr << "No method " << method_name << "found for class " << class_name << "\n.";
+    return NULL;
 }
 
 /*
@@ -351,23 +380,15 @@ void program_class::semant()
     env.curr = NULL;
     env.ct = classtable;
 
-    env.om->enterscope();
-    env.ct->install_basic_classes(env);
-    for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
-        env.curr = classes->nth(i);
-        //env.mm[classes->nth(i)->get_name()] = classes->nth(i);
-        classes->nth(i)->init_class(env);
-    }
-
     /* Perform a top-down traversal to fill out the symbol table and then
        a bottom-up traversal to type-check. */
     for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
+        env.om->enterscope();
         env.curr = classes->nth(i);
+        classes->nth(i)->init_class(env);
         classes->nth(i)->type_check(env);
+        env.om->exitscope();
     }
-    env.om->exitscope();
-
-    /* some semantic analysis code may go here */
 
     if (classtable->errors()) {
 	cerr << "Compilation halted due to static semantic errors." << endl;
@@ -386,7 +407,9 @@ void program_class::semant()
  */
 void class__class::add_to_class_table(std::map<Symbol, Symbol> &ct,
                                       std::map<Symbol, Class_> &sm) {
+    //cout << "Adding class " << name << " to class table.\n";
     if (ct.count(name) == 0) {
+        //cout << "Added class " << name << " to class table.";
         ct[name] = parent;
         sm[name] = this;
     }
@@ -401,28 +424,58 @@ Symbol class__class::get_name() {
 }
 
 /*
- * Initializes environment tables with class attributes and methods.
+ * Initializes environment tables with class attributes.
  */
 void class__class::init_class(type_env_t env) {
+    if (name != Object) {
+        env.ct->get_class(parent)->init_class(env);
+    }
     for (int i = features->first(); features->more(i); i = features->next(i)) {
         features->nth(i)->add_to_environment(env);
     }
 }
 
+Formals class__class::get_formals(Symbol method) {
+    for (int i = features->first(); features->more(i); i = features->next(i)) {
+        Feature feature = features->nth(i);
+        if (feature->is_method() && feature->get_name() == method)
+            return feature->get_formals();
+    }
+    return NULL;
+}
+
+Symbol class__class::get_return_type(Symbol method) {
+    for (int i = features->first(); features->more(i); i = features->next(i)) {
+        Feature feature = features->nth(i);
+        if (feature->is_method() && feature->get_name() == method)
+            return feature->get_return_type();
+    }
+    return NULL;
+}
+
+bool method_class::is_method() { return true; };
+bool attr_class::is_method() { return false; };
+Formals method_class::get_formals() { return formals; };
+Symbol method_class::get_return_type() { return return_type; };
+Formals attr_class::get_formals() { cerr << "Tried to get formals from attr_class.\n"; return NULL; };
+Symbol attr_class::get_return_type() { cerr << "Tried to get ret val from attr_class.\n"; return NULL; };
+Symbol method_class::get_name() { return name; };
+Symbol attr_class::get_name() { return name; };
+
 void method_class::add_to_environment(type_env_t env) {
-    env.mm[std::make_pair(env.curr->get_name(), name)] = std::make_pair(formals, return_type);
 }
 
 void attr_class::add_to_environment(type_env_t env) {
-    env.om->addid(name, &type_decl);
+    if (env.om->probe(name) == NULL)
+        env.om->addid(name, &type_decl);
+    else
+        cerr << "Unable to add attribute " << name << " to object map (already defined).\n";
 }
 
 Class_ class__class::type_check(type_env_t env) {
-    env.om->enterscope();
     for (int i = features->first(); features->more(i); i = features->next(i)) {
         features->nth(i)->type_check(env);
     }
-    env.om->exitscope();
     return this;
 }
 
@@ -522,9 +575,11 @@ Expression dispatch_class::type_check(type_env_t env) {
         param_types.push_back(actual->nth(i)->type_check(env)->type);
     }
 
-    // Need to check if key exists?
-    Formals formals = env.mm.find(std::make_pair(curr, name))->second.first;
-    Symbol ret_type = env.mm.find(std::make_pair(curr, name))->second.second;
+    //cout << curr << "." << name << "()\n";
+    Formals formals = env.ct->get_formals(curr, name);
+    //cout << "Got formals.\n";
+    Symbol ret_type = env.ct->get_return_type(curr, name);
+    //cout << "Got formals and return type for " << curr << "." << name << "().\n";
     for (std::vector<Symbol>::iterator iter = param_types.begin(); iter != param_types.end(); ++iter) {
         Symbol param_type = *iter;
         // Check formals
@@ -533,7 +588,6 @@ Expression dispatch_class::type_check(type_env_t env) {
         type = t0;
     else
         type = ret_type;
-        type = t0;
     return this;
 }
 
