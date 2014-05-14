@@ -306,7 +306,6 @@ Class_ ClassTable::get_class(Symbol class_name) {
 Formals ClassTable::get_formals(Symbol class_name, Symbol method_name) {
     Symbol cname = class_name;
     while (class_name != No_class) {
-        //cout << "Getting formals for: " << cname << "." << method_name << "().\n";
         Class_ c = class_map[cname];
         Formals f = c->get_formals(method_name);
         if (f != NULL)
@@ -326,7 +325,6 @@ Formals ClassTable::get_formals(Symbol class_name, Symbol method_name) {
 Symbol ClassTable::get_return_type(Symbol class_name, Symbol method_name) {
     Symbol cname = class_name;
     while (class_name != No_class) {
-        //cout << "Getting return type for: " << cname << "." << method_name << "().\n";
         Class_ c = class_map[cname];
         Symbol r = c->get_return_type(method_name);
         if (r != NULL)
@@ -407,9 +405,7 @@ void program_class::semant()
  */
 void class__class::add_to_class_table(std::map<Symbol, Symbol> &ct,
                                       std::map<Symbol, Class_> &sm) {
-    //cout << "Adding class " << name << " to class table.\n";
     if (ct.count(name) == 0) {
-        //cout << "Added class " << name << " to class table.";
         ct[name] = parent;
         sm[name] = this;
     }
@@ -435,6 +431,10 @@ void class__class::init_class(type_env_t env) {
     }
 }
 
+/*
+ * Gets the list of formals for a particular method of the class.
+ * Returns NULL if the method isn't found.
+ */
 Formals class__class::get_formals(Symbol method) {
     for (int i = features->first(); features->more(i); i = features->next(i)) {
         Feature feature = features->nth(i);
@@ -444,6 +444,10 @@ Formals class__class::get_formals(Symbol method) {
     return NULL;
 }
 
+/*
+ * Gets the return type of a particular method of the class.
+ * Returns NULL if the method isn't found.
+ */
 Symbol class__class::get_return_type(Symbol method) {
     for (int i = features->first(); features->more(i); i = features->next(i)) {
         Feature feature = features->nth(i);
@@ -462,8 +466,7 @@ Symbol attr_class::get_return_type() { cerr << "Tried to get ret val from attr_c
 Symbol method_class::get_name() { return name; };
 Symbol attr_class::get_name() { return name; };
 
-void method_class::add_to_environment(type_env_t env) {
-}
+void method_class::add_to_environment(type_env_t env) {}
 
 void attr_class::add_to_environment(type_env_t env) {
     if (env.om->probe(name) == NULL)
@@ -473,6 +476,7 @@ void attr_class::add_to_environment(type_env_t env) {
 }
 
 Class_ class__class::type_check(type_env_t env) {
+    //cout << "Starting type check for class " << name << ".\n";
     for (int i = features->first(); features->more(i); i = features->next(i)) {
         features->nth(i)->type_check(env);
     }
@@ -480,6 +484,7 @@ Class_ class__class::type_check(type_env_t env) {
 }
 
 Feature method_class::type_check(type_env_t env) {
+    //cout << "Type checking method " << name << ".\n";
     // This assumes the method is already in the method map.
     // Doesn't check for inheritance.
     env.om->enterscope();
@@ -489,7 +494,8 @@ Feature method_class::type_check(type_env_t env) {
         formals->nth(i)->type_check(env);
     }
     Symbol tret = expr->type_check(env)->type;
-    // If return type is SELF_TYPE
+    if (tret == SELF_TYPE)
+        tret = env.curr->get_name();
     if (return_type == SELF_TYPE) {
         if (env.ct->is_child(tret, curr_class)) {}
         else {
@@ -497,7 +503,6 @@ Feature method_class::type_check(type_env_t env) {
             err_stream << "Method initialization " << tret << " is not a subclass of " << curr_class << ".\n";
         }
     }
-    // Otherwise
     else {
         if (env.ct->is_child(tret, return_type)) {}
         else {
@@ -510,12 +515,15 @@ Feature method_class::type_check(type_env_t env) {
 }
 
 Feature attr_class::type_check(type_env_t env) {
-    env.om->addid(name, &type_decl);
+    //cout << "Type checking attribute " << name << ".\n";
+//    env.om->addid(name, &type_decl);
     env.om->enterscope();
     Symbol curr_class = env.curr->get_name();
     env.om->addid(self, &curr_class);
     Symbol t1 = init->type_check(env)->type;
     env.om->exitscope();
+    if (t1 == SELF_TYPE)
+        t1 = env.curr->get_name();
     // No init
     if (t1 == No_type) {
         // Nothing to do?
@@ -534,6 +542,7 @@ Feature attr_class::type_check(type_env_t env) {
 }
 
 Formal formal_class::type_check(type_env_t env) {
+    //cout << "Type checking formal " << name << ".\n";
     env.om->addid(name, &type_decl);
     return this;
 }
@@ -544,6 +553,7 @@ Symbol branch_class::type_check(type_env_t env) {
 }
 
 Expression assign_class::type_check(type_env_t env) {
+    //cout << "In assign_class\n";
     Symbol t1 = *env.om->lookup(name);
     Symbol t2 = expr->type_check(env)->type;
     if (env.ct->is_child(t2, t1))
@@ -556,38 +566,50 @@ Expression assign_class::type_check(type_env_t env) {
 }
 
 Expression static_dispatch_class::type_check(type_env_t env) {
+     //cout << "In static_dispatch_class\n";
+    std::vector<Symbol> param_types;
+    Symbol curr;
     Symbol t0 = expr->type_check(env)->type;
-    for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
-        actual->nth(i)->type_check(env);
+    if (t0 == SELF_TYPE)
+        t0 = env.curr->get_name();
+    if (env.ct->is_child(t0, type_name)) {
+        for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
+            param_types.push_back(actual->nth(i)->type_check(env)->type);
+        }
+        Formals formals = env.ct->get_formals(t0, name);
+        Symbol ret_type = env.ct->get_return_type(t0, name);
+        for (std::vector<Symbol>::iterator iter = param_types.begin(); iter != param_types.end(); ++iter) {
+            Symbol param_type = *iter;
+            // TODO: Check formals
+        }
+        type = ret_type;
+    }
+    else {
+        ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "Evaluated class " << t0 << " must be a child of declared class "
+                   << type_name << " in static dispatch.\n";
+        type = Object;
     }
     return this;
 }
 
 Expression dispatch_class::type_check(type_env_t env) {
+    //cout << "In dispatch_class\n";
     std::vector<Symbol> param_types;
     Symbol curr;
     Symbol t0 = expr->type_check(env)->type;
-    if (t0 == SELF_TYPE) // Should this be SELF_TYPE???
-        curr = env.curr->get_name();
-    else
-        curr = t0;
+    if (t0 == SELF_TYPE)
+        t0 = env.curr->get_name();
     for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
         param_types.push_back(actual->nth(i)->type_check(env)->type);
     }
-
-    //cout << curr << "." << name << "()\n";
-    Formals formals = env.ct->get_formals(curr, name);
-    //cout << "Got formals.\n";
-    Symbol ret_type = env.ct->get_return_type(curr, name);
-    //cout << "Got formals and return type for " << curr << "." << name << "().\n";
+    Formals formals = env.ct->get_formals(t0, name);
+    Symbol ret_type = env.ct->get_return_type(t0, name);
     for (std::vector<Symbol>::iterator iter = param_types.begin(); iter != param_types.end(); ++iter) {
         Symbol param_type = *iter;
-        // Check formals
+        // TODO: Check formals
     }
-    if (ret_type == SELF_TYPE)
-        type = t0;
-    else
-        type = ret_type;
+    type = ret_type;
     return this;
 }
 
@@ -824,8 +846,12 @@ Expression no_expr_class::type_check(type_env_t env) {
 }
 
 Expression object_class::type_check(type_env_t env) {
-    if (env.om->lookup(name) != NULL)
+    if (name == self)
+        type = SELF_TYPE;
+    else if (env.om->lookup(name) != NULL)
         type = *(env.om->lookup(name));
+    else
+        cerr << "Could not find object " << name << " in object map.\n";
     return this;
 }
 
