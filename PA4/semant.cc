@@ -274,9 +274,9 @@ void ClassTable::validate() {
  */
 Symbol ClassTable::lub(Symbol class1, Symbol class2) {
     Symbol c1 = class1;
-    Symbol c2 = class2;
     Symbol parent = Object;
     while (c1 != Object) {
+        Symbol c2 = class2;
         while (c2 != Object) {
             if (c1 == c2) {
                 parent = c1;
@@ -476,7 +476,7 @@ void attr_class::add_to_environment(type_env_t env) {
 }
 
 Class_ class__class::type_check(type_env_t env) {
-    cout << "Starting type check for class " << name << ".\n";
+    //cout << "Starting type check for class " << name << ".\n";
     for (int i = features->first(); features->more(i); i = features->next(i)) {
         features->nth(i)->type_check(env);
     }
@@ -484,7 +484,7 @@ Class_ class__class::type_check(type_env_t env) {
 }
 
 Feature method_class::type_check(type_env_t env) {
-    cout << "Type checking method " << name << ".\n";
+    //cout << "Type checking method " << name << ".\n";
     // This assumes the method is already in the method map.
     // Doesn't check for inheritance.
     env.om->enterscope();
@@ -500,14 +500,16 @@ Feature method_class::type_check(type_env_t env) {
         if (env.ct->is_child(tret, curr_class)) {}
         else {
             ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
-            err_stream << "Method initialization " << tret << " is not a subclass of " << curr_class << ".\n";
+            err_stream << "Method initialization " << tret
+                       << " is not a subclass of " << curr_class << ".\n";
         }
     }
     else {
         if (env.ct->is_child(tret, return_type)) {}
         else {
             ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
-            err_stream << "Method initialization " << tret << " is not a subclass of " << return_type << ".\n";
+            err_stream << "Method initialization " << tret
+                       << " is not a subclass of " << return_type << ".\n";
         }
     }
     env.om->exitscope();
@@ -515,7 +517,7 @@ Feature method_class::type_check(type_env_t env) {
 }
 
 Feature attr_class::type_check(type_env_t env) {
-    cout << "Type checking attribute " << name << ".\n";
+    //cout << "Type checking attribute " << name << ".\n";
 //    env.om->addid(name, &type_decl);
     env.om->enterscope();
     Symbol curr_class = env.curr->get_name();
@@ -524,18 +526,11 @@ Feature attr_class::type_check(type_env_t env) {
     env.om->exitscope();
     if (t1 == SELF_TYPE)
         t1 = env.curr->get_name();
-    // No init
-    if (t1 == No_type) {
-        // Nothing to do?
-    }
-    // With init
-    else {
-        if (env.ct->is_child(t1, type_decl)) {
-            // Nothing to do?
-        }
-        else {
+    if (t1 != No_type) {
+        if (!(env.ct->is_child(t1, type_decl))) {
             ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
-            err_stream << "Attribute initialization " << t1 << " is not a subclass of " << type_decl << ".\n";
+            err_stream << "Attribute initialization " << t1
+                       << " is not a subclass of " << type_decl << ".\n";
         }
     }
     return this;
@@ -557,7 +552,7 @@ Symbol branch_class::type_check(type_env_t env) {
 }
 
 Expression assign_class::type_check(type_env_t env) {
-    cout << "In assign_class\n";
+    //cout << "In assign_class\n";
     Symbol t1 = *env.om->lookup(name);
     Symbol t2 = expr->type_check(env)->type;
     if (t2 == SELF_TYPE) {
@@ -576,7 +571,7 @@ Expression assign_class::type_check(type_env_t env) {
 }
 
 Expression static_dispatch_class::type_check(type_env_t env) {
-    cout << "In static_dispatch_class\n";
+    //cout << "In static_dispatch_class\n";
     std::vector<Symbol> param_types;
     Symbol t0 = expr->type_check(env)->type;
     if (t0 == SELF_TYPE)
@@ -606,7 +601,7 @@ Expression static_dispatch_class::type_check(type_env_t env) {
 }
 
 Expression dispatch_class::type_check(type_env_t env) {
-    cout << "In dispatch_class\n";
+    //cout << "In dispatch_class\n";
     std::vector<Symbol> param_types;
     Symbol t0 = expr->type_check(env)->type;
     Symbol curr = t0;
@@ -617,7 +612,6 @@ Expression dispatch_class::type_check(type_env_t env) {
     }
     Formals formals = env.ct->get_formals(curr, name);
     Symbol ret_type = env.ct->get_return_type(curr, name);
-    cout << "Return type: " << ret_type << "\n";
     for (std::vector<Symbol>::iterator iter = param_types.begin(); iter != param_types.end(); ++iter) {
         Symbol param_type = *iter;
         // TODO: Check formals
@@ -630,12 +624,16 @@ Expression dispatch_class::type_check(type_env_t env) {
 }
 
 Expression cond_class::type_check(type_env_t env) {
-    cout << "In cond_class\n";
+    //cout << "In cond_class\n";
     Symbol t1 = pred->type_check(env)->type;
     Symbol t2 = then_exp->type_check(env)->type;
+    if (t2 == SELF_TYPE)
+        t2 = env.curr->get_name();
     Symbol t3 = else_exp->type_check(env)->type;
+    if (t3 == SELF_TYPE)
+        t3 = env.curr->get_name();
     if (t1 == Bool)
-        type = env.ct->lub(t1, t2);
+        type = env.ct->lub(t2, t3);
     else {
         ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
         err_stream << "If condition did not evaluate to a boolean.\n";
@@ -645,7 +643,7 @@ Expression cond_class::type_check(type_env_t env) {
 }
 
 Expression loop_class::type_check(type_env_t env) {
-    cout << "In loop_class\n";
+    //cout << "In loop_class\n";
     Symbol t1 = pred->type_check(env)->type;
     Symbol t2 = body->type_check(env)->type;
     if (t1 == Bool)
@@ -659,7 +657,7 @@ Expression loop_class::type_check(type_env_t env) {
 }
 
 Expression typcase_class::type_check(type_env_t env) {
-    cout << "In typecase_class\n";
+    //cout << "In typecase_class\n";
     Symbol t0 = expr->type_check(env)->type;
     // Warning: The following typechecks the first case twice.
     //          Might need to change this.
@@ -674,7 +672,7 @@ Expression typcase_class::type_check(type_env_t env) {
 }
 
 Expression block_class::type_check(type_env_t env) {
-    cout << "In block_class\n";
+    //cout << "In block_class\n";
     Symbol t1;
     for (int i = body->first(); body->more(i); i = body->next(i)) {
         t1 = body->nth(i)->type_check(env)->type;
@@ -684,12 +682,8 @@ Expression block_class::type_check(type_env_t env) {
 }
 
 Expression let_class::type_check(type_env_t env) {
-    cout << "In let_class\n";
-    Symbol t0;
-    if (type_decl == SELF_TYPE)
-        t0 = env.curr->get_name();
-    else
-        t0 = type_decl;
+    //cout << "In let_class\n";
+    Symbol t0 = type_decl;
     Symbol t1 = init->type_check(env)->type;
     // No init
     if (t1 == No_type) {
@@ -710,7 +704,7 @@ Expression let_class::type_check(type_env_t env) {
         }
         else {
             ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
-            err_stream << "Expression must evaluate to a child of " << t0 << "\n.";
+            err_stream << "Expression must evaluate to a child of " << t0 << ".\n";
             type = Object;
         }
     }
@@ -794,15 +788,23 @@ Expression lt_class::type_check(type_env_t env) {
     return this;
 }
 
+/*
+ * Type check for e1 = e2
+ * Any comparison is legal, except: if one argument is (Int || Str || Bool),
+ * the other must match.
+ */
 Expression eq_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
     Symbol t2 = e2->type_check(env)->type;
-    if ((t1 == Int && t2 == Int) || (t1 == Str && t2 == Str) || (t1 == Bool && t2 == Bool))
-        type = Bool;
-    else {
+    if ((t1 == Int && t2 != Int) || (t1 != Int && t2 == Int) ||
+        (t1 == Str && t2 != Str) || (t1 != Str && t2 == Str) ||
+        (t1 == Bool && t2 != Bool) || (t1 != Bool && t2 == Bool)) {
         ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
-        err_stream << "non-Int arguments " << t1 << " = " << t2 << ".\n";
+        err_stream << "Cannot compare arguments " << t1 << " = " << t2 << ".\n";
         type = Object;
+    }
+    else {
+        type = Bool;
     }
     return this;
 }

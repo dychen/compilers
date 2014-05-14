@@ -17,8 +17,6 @@
 #include <symtab.h>
 
 class ClassTable; // Defined in semant.h
-typedef std::pair<Symbol, Symbol> class_method_pair;
-typedef std::pair<Formals, Symbol> formals_return_pair;
 
 struct type_env_t {
     // Object map O<id name, id type>
