@@ -33,6 +33,7 @@ public:
   ostream& semant_error();
   ostream& semant_error(Class_ c);
   ostream& semant_error(Symbol filename, tree_node *t);
+  void add_to_class_table(Class_ c);
   void validate();
   Symbol lub(Symbol c1, Symbol c2);
   Class_ get_class(Symbol class_name);

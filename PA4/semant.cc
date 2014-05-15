@@ -89,7 +89,7 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
 
     /* Add other classes */
     for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
-        classes->nth(i)->add_to_class_table(inheritance_graph, class_map);
+        add_to_class_table(classes->nth(i));
     }
 }
 
@@ -193,11 +193,11 @@ void ClassTable::install_basic_classes() {
 						      no_expr()))),
 	       filename);
 
-    Object_class->add_to_class_table(inheritance_graph, class_map);
-    IO_class->add_to_class_table(inheritance_graph, class_map);
-    Int_class->add_to_class_table(inheritance_graph, class_map);
-    Bool_class->add_to_class_table(inheritance_graph, class_map);
-    Str_class->add_to_class_table(inheritance_graph, class_map);
+    add_to_class_table(Object_class);
+    add_to_class_table(IO_class);
+    add_to_class_table(Int_class);
+    add_to_class_table(Bool_class);
+    add_to_class_table(Str_class);
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -237,15 +237,47 @@ ostream& ClassTable::semant_error()
  */
 
 /*
+ * Adds the class to the class table (specifically, adds it to the class map
+ * and the inheritance graph) with the following caveats:
+ * - Cannot add a class that has already been defined.
+ * - Classes cannot inherit from Bool, SELF_TYPE, or String.
+ * - Cannot define a SELF_TYPE class.
+ */
+void ClassTable::add_to_class_table(Class_ c) {
+    Symbol name = c->get_name();
+    Symbol parent = c->get_parent();
+    if (parent == Bool || parent == SELF_TYPE || parent == Str) {
+        ostream &err_stream = semant_error(c);
+        err_stream << "Class " << name << " cannot inherit class " << parent << ".\n"; 
+    }
+    else if (name == SELF_TYPE) {
+        ostream &err_stream = semant_error(c);
+        err_stream << "Redefinition of basic class " << name << ".\n";
+    }
+    else if (class_map.count(name) == 0 && inheritance_graph.count(name) == 0) {
+        class_map[name] = c;
+        inheritance_graph[name] = parent;
+    }
+    else {
+        ostream &err_stream = semant_error(c);
+        err_stream << "Class " << name << " has already been defined.\n";
+    }
+}
+
+/*
  * Validates the inheritance graph by checking that:
  *   1. Every parent class is defined.
  *   2. There are no cycles.
+ *   3. The class Main is defined.
  */
 void ClassTable::validate() {
+    bool is_main_defined = false;
     for (std::map<Symbol, Symbol>::iterator iter = inheritance_graph.begin();
-         iter != inheritance_graph.end(); ++iter) {
+        iter != inheritance_graph.end(); ++iter) {
         Symbol child = iter->first;
         Symbol parent = iter->second;
+        if (child == Main)
+            is_main_defined = true;
         while (parent != No_class) {
             if (parent == child) {
                 // Error - cycle detected
@@ -256,7 +288,8 @@ void ClassTable::validate() {
             else if (inheritance_graph.count(parent) == 0) {
                 // Error - parent not found
                 ostream& err_stream = semant_error(class_map[child]);
-                err_stream << "Class " << child << " inherits from undefined class " << parent << ".\n";
+                err_stream << "Class " << child << " inherits from undefined class "
+                           << parent << ".\n";
                 break;
             }
             else {
@@ -264,6 +297,10 @@ void ClassTable::validate() {
             }
         }
     } 
+    if (is_main_defined == false) {
+        ostream &err_stream = semant_error();
+        err_stream << "Class Main is not defined.\n";
+    }
 }
 
 /*
@@ -398,29 +435,21 @@ void program_class::semant()
  * Other semantic analysis helper methods defined in cool-tree.h
  */
 
-/*
- * Adds (current class, parent class) as a key, value pair to the
- * inheritance graph. Throws an error if the class has already been
- * defined.
- */
-void class__class::add_to_class_table(std::map<Symbol, Symbol> &ct,
-                                      std::map<Symbol, Class_> &sm) {
-    if (ct.count(name) == 0) {
-        ct[name] = parent;
-        sm[name] = this;
-    }
-    else {
-        //ostream &err_stream = semant_error();
-        //err_stream << "Class " << name << " is multiply defined.";
-    }
-}
-
 Symbol class__class::get_name() {
     return name;
 }
 
+Symbol class__class::get_parent() {
+    return parent;
+}
+
 /*
  * Initializes environment tables with class attributes.
+ * Adds class attributes along the inheritance change,
+ * adding parent class attributes first.
+ * TODO: Fix attribute overriding (child attribute should
+ *       override parent attribute, but attributes shouldn't
+ *       be multiply defined for a single class.
  */
 void class__class::init_class(type_env_t env) {
     if (name != Object) {
@@ -457,22 +486,29 @@ Symbol class__class::get_return_type(Symbol method) {
     return NULL;
 }
 
-bool method_class::is_method() { return true; };
-bool attr_class::is_method() { return false; };
-Formals method_class::get_formals() { return formals; };
-Symbol method_class::get_return_type() { return return_type; };
-Formals attr_class::get_formals() { cerr << "Tried to get formals from attr_class.\n"; return NULL; };
-Symbol attr_class::get_return_type() { cerr << "Tried to get ret val from attr_class.\n"; return NULL; };
+bool method_class::is_method() { return true; }
+bool attr_class::is_method() { return false; }
+
+Formals method_class::get_formals() { return formals; }
+Symbol method_class::get_return_type() { return return_type; }
+
+// These two methods should never be called.
+Formals attr_class::get_formals() { return NULL; }
+Symbol attr_class::get_return_type() { return NULL; }
+
 Symbol method_class::get_name() { return name; };
 Symbol attr_class::get_name() { return name; };
 
-void method_class::add_to_environment(type_env_t env) {}
+void method_class::add_to_environment(type_env_t env) { /* Nothing to do */ }
 
 void attr_class::add_to_environment(type_env_t env) {
     if (env.om->probe(name) == NULL)
         env.om->addid(name, &type_decl);
-    else
-        cerr << "Unable to add attribute " << name << " to object map (already defined).\n";
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "Unable to add attribute " << name
+                   << " to object map (already defined).\n";
+    }
 }
 
 Class_ class__class::type_check(type_env_t env) {
@@ -532,6 +568,10 @@ Feature attr_class::type_check(type_env_t env) {
             err_stream << "Attribute initialization " << t1
                        << " is not a subclass of " << type_decl << ".\n";
         }
+    }
+    if (name == self) {
+        ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "'self' cannot be the name of an attribute.\n";
     }
     return this;
 }
@@ -850,10 +890,7 @@ Expression string_const_class::type_check(type_env_t env) {
 }
 
 Expression new__class::type_check(type_env_t env) {
-    if (type_name == SELF_TYPE)
-        type = env.curr->get_name();
-    else
-        type = type_name;
+    type = type_name;
     return this;
 }
 

@@ -50,10 +50,9 @@ public:
    tree_node *copy()		 { return copy_Class_(); }
    virtual Class_ copy_Class_() = 0;
     virtual Class_ type_check(type_env_t env) = 0;
-    virtual void add_to_class_table(std::map<Symbol, Symbol> &ct,
-                                    std::map<Symbol, Class_> &sm) = 0;
     virtual void init_class(type_env_t env) = 0;
     virtual Symbol get_name() = 0;
+    virtual Symbol get_parent() = 0;
     virtual Formals get_formals(Symbol method) = 0;
     virtual Symbol get_return_type(Symbol method) = 0;
 
@@ -192,10 +191,9 @@ public:
    Class_ copy_Class_();
    void dump(ostream& stream, int n);
     Class_ type_check(type_env_t env);
-    void add_to_class_table(std::map<Symbol, Symbol> &ct,
-                            std::map<Symbol, Class_> &sm);
     void init_class(type_env_t env);
     Symbol get_name();
+    Symbol get_parent();
     Formals get_formals(Symbol method);
     Symbol get_return_type(Symbol method);
 
