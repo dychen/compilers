@@ -18,10 +18,13 @@
 
 class ClassTable; // Defined in semant.h
 
+// Environment struct <O, M, C> used in type checking
 struct type_env_t {
     // Object map O<id name, id type>
     SymbolTable<Symbol, Symbol> *om;
-    // Contains the class map and inheritance graph M
+    // Contains the class map and inheritance graph
+    // These are used for class and method inheritance
+    // See semant.h for more details
     ClassTable *ct;
     // Current class C
     Class_ curr;

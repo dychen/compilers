@@ -466,12 +466,12 @@ void program_class::semant()
         env.curr = NULL;
         env.ct = classtable;
 
-        /* Perform a top-down traversal to fill out the symbol table and then
-           a bottom-up traversal to type-check. */
+        /* Recurisvely type check each class. */
         for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
             env.om->enterscope();
             env.curr = classes->nth(i);
-            classes->nth(i)->init_class(env);
+            classes->nth(i)->init_class(env); // So the attributes are global
+                                              // in the class environment/scope
             classes->nth(i)->type_check(env);
             env.om->exitscope();
         }
@@ -484,7 +484,7 @@ void program_class::semant()
 }
 
 /*
- * Other semantic analysis helper methods defined in cool-tree.h
+ * Other semantic analysis helper methods defined in cool-tree.h.
  */
 
 Symbol class__class::get_name() {
@@ -535,6 +535,9 @@ Symbol class__class::get_return_type(Symbol method) {
     return NULL;
 }
 
+/*
+ * Simple accessors for classes defined in cool-tree.h.
+ */
 bool method_class::is_method() { return true; }
 bool attr_class::is_method() { return false; }
 
@@ -549,7 +552,6 @@ Symbol method_class::get_name() { return name; };
 Symbol attr_class::get_name() { return name; };
 
 void method_class::add_to_environment(type_env_t env) { /* Nothing to do */ }
-
 void attr_class::add_to_environment(type_env_t env) {
     if (env.om->probe(name) == NULL)
         env.om->addid(name, &type_decl);
@@ -561,19 +563,30 @@ void attr_class::add_to_environment(type_env_t env) {
 }
 
 Symbol formal_class::get_type() { return type_decl; }
-
 Symbol branch_class::get_type() { return type_decl; }
 
+/*
+ * Top-most step in recursive type checking. Recursively checks each of the
+ * features (methods and attributes). Does not impose any type restrictions.
+ */
 Class_ class__class::type_check(type_env_t env) {
-    //cout << "Starting type check for class " << name << ".\n";
     for (int i = features->first(); features->more(i); i = features->next(i)) {
         features->nth(i)->type_check(env);
     }
     return this;
 }
 
+/*
+ * Recursively checks formal parameters for the method as follows:
+ * 1. In a new environment scope, bind the keyword self.
+ * 2. Recursively check the formal parameters in this environment.
+ * 3. For the resulting parameter types:
+ *    - If the method is inherited, make sure the ancestor method is properly overwritten.
+ *    - Declared return value of SELF_TYPE should return SELF_TYPE.
+ *    - Make sure the return type is a defined class (exists in the class table).
+ *    - Make sure the return type is a subtype of the declared return type.
+ */
 Feature method_class::type_check(type_env_t env) {
-    //cout << "Type checking method " << name << ".\n";
     env.om->enterscope();
     Symbol curr_class = env.curr->get_name();
     env.om->addid(self, &curr_class);
@@ -582,7 +595,6 @@ Feature method_class::type_check(type_env_t env) {
     }
     Symbol tret = expr->type_check(env)->type;
 
-    // If the method is inherited, make sure ancestor method is properly overwritten
     Symbol ancestor = NULL;
     if ((ancestor = env.ct->get_ancestor_method_class(curr_class, name)) != NULL) {
         if (!env.ct->check_method_signature(ancestor, curr_class, name)) {
@@ -601,7 +613,6 @@ Feature method_class::type_check(type_env_t env) {
         }
     }
     else if (!env.ct->class_exists(return_type)) {
-        // Make sure the return type is defined
         ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
         err_stream << "Undefined return type " << return_type << " in method " << name << ".\n";
     }
@@ -618,8 +629,13 @@ Feature method_class::type_check(type_env_t env) {
     return this;
 }
 
+/*
+ * Type checks a class attribute as follows:
+ * 1. In a new environment scope, bind the keyword self.
+ * 2. Evaluate the initialization of the attribute.
+ * 3. Make sure the initialized type is a subclass of the declared type.
+ */
 Feature attr_class::type_check(type_env_t env) {
-    //cout << "Type checking attribute " << name << ".\n";
     env.om->enterscope();
     Symbol curr_class = env.curr->get_name();
     env.om->addid(self, &curr_class);
@@ -641,6 +657,10 @@ Feature attr_class::type_check(type_env_t env) {
     return this;
 }
 
+/*
+ * Type checks a formal parameter by making sure it hasn't already been defined in the
+ * current scope.
+ */
 Formal formal_class::type_check(type_env_t env) {
     if (env.om->probe(name) != NULL) {
         ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
@@ -655,13 +675,24 @@ Formal formal_class::type_check(type_env_t env) {
     return this;
 }
 
+/* Adds the branch to the environment. See typcase_class for more details. */
 Symbol branch_class::type_check(type_env_t env) {
+    // The following condition should never be true because a branch identifier
+    // is the first thing initialized in its own scope. This is just a sanity check.
+    if (env.om->probe(name) != NULL) {
+        ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "Identifier " << name << " already defined in current scope.\n";
+        return Object;
+    }
     env.om->addid(name, &type_decl);
     return expr->type_check(env)->type;
 }
 
+/*
+ * Adds the identifier to the environment after checking its evaulated type
+ * and making sure that's a subclass of the declared type.
+ */
 Expression assign_class::type_check(type_env_t env) {
-    //cout << "In assign_class\n";
     Symbol t1 = *env.om->lookup(name);
     Symbol t2 = expr->type_check(env)->type;
     if (t2 == SELF_TYPE) {
@@ -679,8 +710,12 @@ Expression assign_class::type_check(type_env_t env) {
     return this;
 }
 
+/*
+ * Same as normal dispatch (see dispatch_class::type_check(type_env_t env) below),
+ * with the additional condition that the evaluated type of the calling expression e
+ * must be a subtype of the static class T in e@T.f(...).
+ */
 Expression static_dispatch_class::type_check(type_env_t env) {
-    //cout << "In static_dispatch_class\n";
     std::vector<Symbol> eval_types; // Vector of parameter types after evaluation
     Symbol t0 = expr->type_check(env)->type;
     if (t0 == SELF_TYPE)
@@ -740,8 +775,17 @@ Expression static_dispatch_class::type_check(type_env_t env) {
     return this;
 }
 
+/*
+ * Given the following expression: e.f(e1, ..., en), performs the following check:
+ * 1. Recursively checks e.
+ * 2. Recursively checks e1, ..., en.
+ * 3. Makes sure that the evaluated types of e1, ..., en are subtypes of the types
+ *    declared in the method signature.
+ * 4. Returns:
+ *    - The evaluated type if the declared type is SELF_TYPE.
+ *    - The declared type otherwise.
+ */
 Expression dispatch_class::type_check(type_env_t env) {
-    //cout << "In dispatch_class\n";
     std::vector<Symbol> eval_types; // Vector of parameter types after evaluation
     Symbol t0 = expr->type_check(env)->type;
     Symbol curr = t0;
@@ -795,8 +839,12 @@ Expression dispatch_class::type_check(type_env_t env) {
     return this;
 }
 
+/*
+ * Recursively type checks the predicate, then the then expression, then the
+ * else expression. Makes sure the predicate evaluates to Bool and returns
+ * the least upper bound of the types of the other two expressions.
+ */
 Expression cond_class::type_check(type_env_t env) {
-    //cout << "In cond_class\n";
     Symbol t1 = pred->type_check(env)->type;
     Symbol t2 = then_exp->type_check(env)->type;
     if (t2 == SELF_TYPE)
@@ -814,8 +862,8 @@ Expression cond_class::type_check(type_env_t env) {
     return this;
 }
 
+/* Recurisvely type checks the predicate and body, makes sure predicate is a Bool. */
 Expression loop_class::type_check(type_env_t env) {
-    //cout << "In loop_class\n";
     Symbol t1 = pred->type_check(env)->type;
     Symbol t2 = body->type_check(env)->type;
     if (t1 == Bool)
@@ -828,10 +876,17 @@ Expression loop_class::type_check(type_env_t env) {
     return this;
 }
 
+/*
+ * Type checks a linked list of branch/case expressions in the followin format:
+ * case e0 of x1:T1=>e1, ..., xn:Tn=>en esac
+ * For each branch i, the current identifier xi is saved in a new scope and the
+ * expression ei is evaluated. The typcase class evaluates the the least upper
+ * bound of the evaluated types.
+ */
 Expression typcase_class::type_check(type_env_t env) {
-    //cout << "In typecase_class\n";
     Symbol t0 = expr->type_check(env)->type;
 
+    // O(N^2) check to make sure there are no duplicate types.
     for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
         for (int j = cases->first(); cases->more(j); j = cases->next(j)) {
             if (i != j && cases->nth(i)->get_type() == cases->nth(j)->get_type()) {
@@ -856,8 +911,8 @@ Expression typcase_class::type_check(type_env_t env) {
     return this;
 }
 
+/* Type checks each enclosing expression. Imposes no type conditions. */
 Expression block_class::type_check(type_env_t env) {
-    //cout << "In block_class\n";
     Symbol t1;
     for (int i = body->first(); body->more(i); i = body->next(i)) {
         t1 = body->nth(i)->type_check(env)->type;
@@ -866,8 +921,16 @@ Expression block_class::type_check(type_env_t env) {
     return this;
 }
 
+/*
+ * Given the expression: let x:T0[<-e1] in e2:T2,
+ * 1. Evaluates the initializing expression e0 if provided.
+ * 2. If e0 is provided, makes sure the evaluated type T1 is a child of the
+ *    declared type T0.
+ * 3. Enters a new environment scope with the identifier x bound to the declared
+ *    type T0.
+ * 4. Typechecks the body e2, and the type evaluates to the evaluated type T2.
+ */
 Expression let_class::type_check(type_env_t env) {
-    //cout << "In let_class\n";
     if (identifier == self) {
         ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
         err_stream << "'self' cannot be bound in a 'let' expression.\n";
@@ -903,6 +966,10 @@ Expression let_class::type_check(type_env_t env) {
     return this;
 }
 
+/*
+ * The following arithmetic classes are self-explanatory:
+ * +, -, *, /, ~, <, =, !
+ */
 Expression plus_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
     Symbol t2 = e2->type_check(env)->type;
@@ -980,14 +1047,11 @@ Expression lt_class::type_check(type_env_t env) {
     return this;
 }
 
-/*
- * Type check for e1 = e2
- * Any comparison is legal, except: if one argument is (Int || Str || Bool),
- * the other must match.
- */
 Expression eq_class::type_check(type_env_t env) {
     Symbol t1 = e1->type_check(env)->type;
     Symbol t2 = e2->type_check(env)->type;
+    // Any comparison is legal, except: if one argument is in {Int, Str, Bool},
+    // the other must match.
     if ((t1 == Int && t2 != Int) || (t1 != Int && t2 == Int) ||
         (t1 == Str && t2 != Str) || (t1 != Str && t2 == Str) ||
         (t1 == Bool && t2 != Bool) || (t1 != Bool && t2 == Bool)) {
@@ -1026,6 +1090,7 @@ Expression comp_class::type_check(type_env_t env) {
     return this;
 }
 
+/* Primitive constants */
 Expression int_const_class::type_check(type_env_t env) {
     type = Int;
     return this;

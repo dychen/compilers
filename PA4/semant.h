@@ -14,11 +14,17 @@
 class ClassTable;
 typedef ClassTable *ClassTableP;
 
-// This is a structure that may be used to contain the semantic
-// information such as the inheritance graph.  You may use it or not as
-// you like: it is only here to provide a container for the supplied
-// methods.
-
+/*
+ * This clas is used to check class and method inheritance and to print errors
+ * encountered in semantic analysis. In type checking, it functions as the method
+ * mapping M.
+ * It contains a class map <class name, Class_ pointer> and an inheritance graph
+ * <class name, parent class name>. The inheritance graph is constructed and
+ * verified to ensure that the class declarations are valid (e.g., no cycles
+ * in the inheritance tree). During type checking, helper methods use these maps
+ * to get method definitions and check method inheritance.
+ * See semant.cc for more details.
+ */
 class ClassTable {
 private:
   int semant_errors;

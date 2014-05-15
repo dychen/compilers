@@ -4,3 +4,7 @@ PA2/
 - cool.flex
 PA3/
 - cool.y
+PA4/
+- cool-tree.h
+- semant.cc
+- semant.h
