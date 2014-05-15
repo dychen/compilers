@@ -329,8 +329,25 @@ Symbol ClassTable::lub(Symbol class1, Symbol class2) {
 }
 
 /*
- * Returns the class pointer of the input class name.
+ * Returns true if child is a subclass of parent, false otherwise.
+ * This is an O(N) algorithm where N is the branch length.
  */
+bool ClassTable::is_child(Symbol child, Symbol parent) {
+    Symbol c = child;
+    if (parent == Object)
+        return true;
+    while (c != Object) {
+        if (c == parent)
+            return true;
+        c = inheritance_graph[c];
+    }
+    return false;
+}
+
+bool ClassTable::class_exists(Symbol c) {
+    return (inheritance_graph.count(c) > 0);
+}
+
 Class_ ClassTable::get_class(Symbol class_name) {
     return class_map[class_name];
 }
@@ -338,8 +355,8 @@ Class_ ClassTable::get_class(Symbol class_name) {
 /*
  * Traverses the inheritance chain of the input class until
  * it finds a method matching the input method name and returns
- * the corresponding formal parameters. Outputs an error and
- * returns NULL if no matching method is found.
+ * the corresponding formal parameters. Returns NULL if no matching
+ * method is found.
  */
 Formals ClassTable::get_formals(Symbol class_name, Symbol method_name) {
     Symbol cname = class_name;
@@ -356,8 +373,8 @@ Formals ClassTable::get_formals(Symbol class_name, Symbol method_name) {
 /*
  * Traverses the inheritance chain of the input class until
  * it finds a method matching the input method name and returns
- * the corresponding formal parameters. Outputs an error and
- * returns NULL if no matching method is found.
+ * the corresponding formal parameters. Returns NULL if no matching
+ * method is found.
  */
 Symbol ClassTable::get_return_type(Symbol class_name, Symbol method_name) {
     Symbol cname = class_name;
@@ -372,20 +389,56 @@ Symbol ClassTable::get_return_type(Symbol class_name, Symbol method_name) {
 }
 
 /*
- * Returns true if child is a subclass of parent, false otherwise.
- * This is an O(N) algorithm where N is the branch length.
+ * Traverses the inheritance chain of the input class, starting with
+ * the parent, until it finds a method matching the input method name
+ * and returns the corresponding class name. Returns NULL if no matching
+ * method is found. This is a kind of hacky solution that uses get_return_type,
+ * which works because get_return_type <=> method exists in that class.
  */
-bool ClassTable::is_child(Symbol child, Symbol parent) {
-    Symbol c = child;
-    if (parent == Object)
-        return true;
-    while (c != Object) {
-        if (c == parent)
-            return true;
-        c = inheritance_graph[c];
+Symbol ClassTable::get_ancestor_method_class(Symbol class_name, Symbol method_name) {
+    Symbol cname = inheritance_graph[class_name];
+    while (cname != No_class) {
+        Class_ c = class_map[cname];
+        if (c->get_return_type(method_name) != NULL)
+            return c->get_name();
+        cname = inheritance_graph[cname];
     }
-    return false;
+    return NULL;
 }
+
+/*
+ * Checks the method signature of the input method for the two classes.
+ * Returns true if the signatures are the same; specifically, if the
+ * following hold:
+ * - Formal parameters have the same types in the same order
+ * - Number of formal parameters are the same
+ * - Return types match
+ * Does NOT ensure that the formal parameters have the same identifiers.
+ */
+bool ClassTable::check_method_signature(Symbol c1, Symbol c2, Symbol method_name) {
+    Class_ class1 = class_map[c1];
+    Class_ class2 = class_map[c2];
+    Formals f1 = class1->get_formals(method_name);
+    Formals f2 = class2->get_formals(method_name);
+    Symbol ret1 = class1->get_return_type(method_name);
+    Symbol ret2 = class2->get_return_type(method_name);
+    int i = f1->first();
+    int j = f2->first();
+    // Check formals
+    while (f1->more(i) && f2->more(j)) {
+        if (f1->nth(i)->get_type() != f2->nth(j)->get_type())
+            return false;
+        i = f1->next(i);
+        j = f2->next(j);
+    }
+    if (f1->more(i) || f2->more(j))
+        return false;
+    // Check return type
+    if (ret1 != ret2)
+        return false;
+    return true;
+}
+
 
 /*   This is the entry point to the semantic checker.
 
@@ -407,7 +460,7 @@ void program_class::semant()
     /* Initialize a new ClassTable inheritance graph and make sure it
        is well-formed. */
     ClassTable *classtable = new ClassTable(classes);
-    if (classtable->is_valid()) {
+    if (!classtable->errors() && classtable->is_valid()) {
         type_env_t env;
         env.om = new SymbolTable<Symbol, Symbol>();
         env.curr = NULL;
@@ -446,9 +499,6 @@ Symbol class__class::get_parent() {
  * Initializes environment tables with class attributes.
  * Adds class attributes along the inheritance change,
  * adding parent class attributes first.
- * TODO: Fix attribute overriding (child attribute should
- *       override parent attribute, but attributes shouldn't
- *       be multiply defined for a single class.
  */
 void class__class::init_class(type_env_t env) {
     if (name != Object) {
@@ -524,7 +574,6 @@ Class_ class__class::type_check(type_env_t env) {
 
 Feature method_class::type_check(type_env_t env) {
     //cout << "Type checking method " << name << ".\n";
-    // TODO: Check inheritance
     env.om->enterscope();
     Symbol curr_class = env.curr->get_name();
     env.om->addid(self, &curr_class);
@@ -532,16 +581,33 @@ Feature method_class::type_check(type_env_t env) {
         formals->nth(i)->type_check(env);
     }
     Symbol tret = expr->type_check(env)->type;
-    if (tret == SELF_TYPE)
-        tret = env.curr->get_name();
-    if (return_type == SELF_TYPE) {
-        if (!env.ct->is_child(tret, curr_class)) {
-            ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
-            err_stream << "Method initialization " << tret
-                       << " is not a subclass of " << curr_class << ".\n";
+
+    // If the method is inherited, make sure ancestor method is properly overwritten
+    Symbol ancestor = NULL;
+    if ((ancestor = env.ct->get_ancestor_method_class(curr_class, name)) != NULL) {
+        if (!env.ct->check_method_signature(ancestor, curr_class, name)) {
+            ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+            err_stream << "Overriding method signature of " << name << " for class "
+                       << curr_class << " doesn't match method signature for ancestor "
+                       << ancestor << ".\n";
         }
     }
+
+    if (return_type == SELF_TYPE) {
+        if (tret != SELF_TYPE) {
+            ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+            err_stream << "Inferred return type " << tret << " of method " << name
+                       << " does not conform to declared return type " << return_type << ".\n";
+        }
+    }
+    else if (!env.ct->class_exists(return_type)) {
+        // Make sure the return type is defined
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "Undefined return type " << return_type << " in method " << name << ".\n";
+    }
     else {
+        if (tret == SELF_TYPE)
+            tret = env.curr->get_name();
         if (!env.ct->is_child(tret, return_type)) {
             ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
             err_stream << "Method initialization " << tret
@@ -976,7 +1042,13 @@ Expression string_const_class::type_check(type_env_t env) {
 }
 
 Expression new__class::type_check(type_env_t env) {
-    type = type_name;
+    if (env.ct->class_exists(type_name) || type_name == SELF_TYPE)
+        type = type_name;
+    else {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "'new' used with undefined class " << type_name << ".\n";
+        type = Object;
+    }
     return this;
 }
 

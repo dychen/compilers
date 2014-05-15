@@ -24,7 +24,7 @@ private:
   int semant_errors;
   void install_basic_classes();
   ostream& error_stream;
-  std::map<Symbol, Class_> class_map;        // Maps class names to the class pointers
+  std::map<Symbol, Class_> class_map;         // Maps class names to the class pointers
   std::map<Symbol, Symbol> inheritance_graph; // Maps child classes to parents
 
 public:
@@ -36,11 +36,13 @@ public:
   void add_to_class_table(Class_ c);
   bool is_valid();
   Symbol lub(Symbol c1, Symbol c2);
+  bool is_child(Symbol child, Symbol parent);
+  bool class_exists(Symbol c);
   Class_ get_class(Symbol class_name);
   Formals get_formals(Symbol class_name, Symbol method_name);
   Symbol get_return_type(Symbol class_name, Symbol method_name);
-  bool is_child(Symbol child, Symbol parent);
-  void init_class(type_env_t env);
+  Symbol get_ancestor_method_class(Symbol class_name, Symbol method_name);
+  bool check_method_signature(Symbol c1, Symbol c2, Symbol method_name);
 };
 
 
