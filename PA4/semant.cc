@@ -247,11 +247,11 @@ void ClassTable::add_to_class_table(Class_ c) {
     Symbol name = c->get_name();
     Symbol parent = c->get_parent();
     if (parent == Bool || parent == SELF_TYPE || parent == Str) {
-        ostream &err_stream = semant_error(c);
+        ostream& err_stream = semant_error(c);
         err_stream << "Class " << name << " cannot inherit class " << parent << ".\n"; 
     }
     else if (name == SELF_TYPE) {
-        ostream &err_stream = semant_error(c);
+        ostream& err_stream = semant_error(c);
         err_stream << "Redefinition of basic class " << name << ".\n";
     }
     else if (class_map.count(name) == 0 && inheritance_graph.count(name) == 0) {
@@ -259,7 +259,7 @@ void ClassTable::add_to_class_table(Class_ c) {
         inheritance_graph[name] = parent;
     }
     else {
-        ostream &err_stream = semant_error(c);
+        ostream& err_stream = semant_error(c);
         err_stream << "Class " << name << " has already been defined.\n";
     }
 }
@@ -270,7 +270,7 @@ void ClassTable::add_to_class_table(Class_ c) {
  *   2. There are no cycles.
  *   3. The class Main is defined.
  */
-void ClassTable::validate() {
+bool ClassTable::is_valid() {
     bool is_main_defined = false;
     for (std::map<Symbol, Symbol>::iterator iter = inheritance_graph.begin();
         iter != inheritance_graph.end(); ++iter) {
@@ -283,24 +283,25 @@ void ClassTable::validate() {
                 // Error - cycle detected
                 ostream& err_stream = semant_error(class_map[child]);
                 err_stream << "Class " << child << " inherits from itself.\n";
-                break;
+                return false;
             }
             else if (inheritance_graph.count(parent) == 0) {
                 // Error - parent not found
                 ostream& err_stream = semant_error(class_map[child]);
                 err_stream << "Class " << child << " inherits from undefined class "
                            << parent << ".\n";
-                break;
+                return false;
             }
-            else {
+            else
                 parent = inheritance_graph[parent];
-            }
         }
     } 
     if (is_main_defined == false) {
-        ostream &err_stream = semant_error();
+        ostream& err_stream = semant_error();
         err_stream << "Class Main is not defined.\n";
+        return false;
     }
+    return true;
 }
 
 /*
@@ -342,14 +343,13 @@ Class_ ClassTable::get_class(Symbol class_name) {
  */
 Formals ClassTable::get_formals(Symbol class_name, Symbol method_name) {
     Symbol cname = class_name;
-    while (class_name != No_class) {
+    while (cname != No_class) {
         Class_ c = class_map[cname];
         Formals f = c->get_formals(method_name);
         if (f != NULL)
             return f;
         cname = inheritance_graph[cname]; 
     }
-    cerr << "No method " << method_name << " found for class " << class_name << "\n.";
     return NULL;
 }
 
@@ -361,14 +361,13 @@ Formals ClassTable::get_formals(Symbol class_name, Symbol method_name) {
  */
 Symbol ClassTable::get_return_type(Symbol class_name, Symbol method_name) {
     Symbol cname = class_name;
-    while (class_name != No_class) {
+    while (cname != No_class) {
         Class_ c = class_map[cname];
         Symbol r = c->get_return_type(method_name);
         if (r != NULL)
             return r;
         cname = inheritance_graph[cname];
     }
-    cerr << "No method " << method_name << "found for class " << class_name << "\n.";
     return NULL;
 }
 
@@ -408,21 +407,21 @@ void program_class::semant()
     /* Initialize a new ClassTable inheritance graph and make sure it
        is well-formed. */
     ClassTable *classtable = new ClassTable(classes);
-    classtable->validate();
+    if (classtable->is_valid()) {
+        type_env_t env;
+        env.om = new SymbolTable<Symbol, Symbol>();
+        env.curr = NULL;
+        env.ct = classtable;
 
-    type_env_t env;
-    env.om = new SymbolTable<Symbol, Symbol>();
-    env.curr = NULL;
-    env.ct = classtable;
-
-    /* Perform a top-down traversal to fill out the symbol table and then
-       a bottom-up traversal to type-check. */
-    for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
-        env.om->enterscope();
-        env.curr = classes->nth(i);
-        classes->nth(i)->init_class(env);
-        classes->nth(i)->type_check(env);
-        env.om->exitscope();
+        /* Perform a top-down traversal to fill out the symbol table and then
+           a bottom-up traversal to type-check. */
+        for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
+            env.om->enterscope();
+            env.curr = classes->nth(i);
+            classes->nth(i)->init_class(env);
+            classes->nth(i)->type_check(env);
+            env.om->exitscope();
+        }
     }
 
     if (classtable->errors()) {
@@ -511,6 +510,10 @@ void attr_class::add_to_environment(type_env_t env) {
     }
 }
 
+Symbol formal_class::get_type() { return type_decl; }
+
+Symbol branch_class::get_type() { return type_decl; }
+
 Class_ class__class::type_check(type_env_t env) {
     //cout << "Starting type check for class " << name << ".\n";
     for (int i = features->first(); features->more(i); i = features->next(i)) {
@@ -521,8 +524,7 @@ Class_ class__class::type_check(type_env_t env) {
 
 Feature method_class::type_check(type_env_t env) {
     //cout << "Type checking method " << name << ".\n";
-    // This assumes the method is already in the method map.
-    // Doesn't check for inheritance.
+    // TODO: Check inheritance
     env.om->enterscope();
     Symbol curr_class = env.curr->get_name();
     env.om->addid(self, &curr_class);
@@ -533,16 +535,14 @@ Feature method_class::type_check(type_env_t env) {
     if (tret == SELF_TYPE)
         tret = env.curr->get_name();
     if (return_type == SELF_TYPE) {
-        if (env.ct->is_child(tret, curr_class)) {}
-        else {
+        if (!env.ct->is_child(tret, curr_class)) {
             ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
             err_stream << "Method initialization " << tret
                        << " is not a subclass of " << curr_class << ".\n";
         }
     }
     else {
-        if (env.ct->is_child(tret, return_type)) {}
-        else {
+        if (!env.ct->is_child(tret, return_type)) {
             ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
             err_stream << "Method initialization " << tret
                        << " is not a subclass of " << return_type << ".\n";
@@ -554,7 +554,6 @@ Feature method_class::type_check(type_env_t env) {
 
 Feature attr_class::type_check(type_env_t env) {
     //cout << "Type checking attribute " << name << ".\n";
-//    env.om->addid(name, &type_decl);
     env.om->enterscope();
     Symbol curr_class = env.curr->get_name();
     env.om->addid(self, &curr_class);
@@ -570,19 +569,23 @@ Feature attr_class::type_check(type_env_t env) {
         }
     }
     if (name == self) {
-        ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
         err_stream << "'self' cannot be the name of an attribute.\n";
     }
     return this;
 }
 
 Formal formal_class::type_check(type_env_t env) {
-    if (env.om->probe(name) == NULL)
-        env.om->addid(name, &type_decl);
-    else {
+    if (env.om->probe(name) != NULL) {
         ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
         err_stream << "Duplicate formal " << name << ".\n";
     }
+    else if (type_decl == SELF_TYPE) {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "Formal parameter " << name << " cannot have type SELF_TYPE\n";
+    }
+    else
+        env.om->addid(name, &type_decl);
     return this;
 }
 
@@ -612,27 +615,58 @@ Expression assign_class::type_check(type_env_t env) {
 
 Expression static_dispatch_class::type_check(type_env_t env) {
     //cout << "In static_dispatch_class\n";
-    std::vector<Symbol> param_types;
+    std::vector<Symbol> eval_types; // Vector of parameter types after evaluation
     Symbol t0 = expr->type_check(env)->type;
     if (t0 == SELF_TYPE)
         t0 = env.curr->get_name();
     if (env.ct->is_child(t0, type_name)) {
         for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
-            param_types.push_back(actual->nth(i)->type_check(env)->type);
+            Symbol tn = actual->nth(i)->type_check(env)->type;
+            if (tn == SELF_TYPE)
+                tn = env.curr->get_name();
+            eval_types.push_back(tn);
         }
-        Formals formals = env.ct->get_formals(t0, name);
-        Symbol ret_type = env.ct->get_return_type(t0, name);
-        for (std::vector<Symbol>::iterator iter = param_types.begin(); iter != param_types.end(); ++iter) {
-            Symbol param_type = *iter;
-            // TODO: Check formals
+        Formals formals = env.ct->get_formals(t0, name);     // Declared formal types
+        Symbol ret_type = env.ct->get_return_type(t0, name); // Declared return type
+        if (formals == NULL || ret_type == NULL) {
+            ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+            err_stream << "Dispatch to undefined method " << name << ".\n";
+            type = Object;
+            return this;
         }
+        // Type check formal parameters
+        std::vector<Symbol>::iterator iter = eval_types.begin();
+        int fi = formals->first();
+        while (iter != eval_types.end() && formals->more(fi)) {
+            Symbol eval_type = *iter;
+            Symbol declared_type = formals->nth(fi)->get_type();
+            if (declared_type == SELF_TYPE) {
+                ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+                err_stream << "Formal parameter cannot have type SELF_TYPE.\n";
+            }
+            else if (!env.ct->is_child(eval_type, declared_type)) {
+                ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+                err_stream << "Formal parameter declared type " << declared_type
+                           << " is not a subclass of " << eval_type << ".\n";
+            }
+            ++iter;
+            fi = formals->next(fi);
+        }
+        if (iter != eval_types.end() || formals->more(fi)) {
+            // If we're here, means the number of parameters didn't match
+            // the expected number from the function definition. This should
+            // not be possible as long as lexing and parsing is correct.
+            ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+            err_stream << "Number of declared formals doesn't match number checked.\n";
+        }
+
         if (ret_type == SELF_TYPE)
             type = t0;
         else
             type = ret_type;
     }
     else {
-        ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
         err_stream << "Evaluated class " << t0 << " must be a child of declared class "
                    << type_name << " in static dispatch.\n";
         type = Object;
@@ -642,20 +676,52 @@ Expression static_dispatch_class::type_check(type_env_t env) {
 
 Expression dispatch_class::type_check(type_env_t env) {
     //cout << "In dispatch_class\n";
-    std::vector<Symbol> param_types;
+    std::vector<Symbol> eval_types; // Vector of parameter types after evaluation
     Symbol t0 = expr->type_check(env)->type;
     Symbol curr = t0;
     if (t0 == SELF_TYPE)
         curr = env.curr->get_name();
     for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
-        param_types.push_back(actual->nth(i)->type_check(env)->type);
+        Symbol tn = actual->nth(i)->type_check(env)->type;
+        if (tn == SELF_TYPE)
+            tn = env.curr->get_name();
+        eval_types.push_back(tn);
     }
-    Formals formals = env.ct->get_formals(curr, name);
-    Symbol ret_type = env.ct->get_return_type(curr, name);
-    for (std::vector<Symbol>::iterator iter = param_types.begin(); iter != param_types.end(); ++iter) {
-        Symbol param_type = *iter;
-        // TODO: Check formals
+    Formals formals = env.ct->get_formals(curr, name);     // Declared formal types
+    Symbol ret_type = env.ct->get_return_type(curr, name); // Declared return type
+    if (formals == NULL || ret_type == NULL) {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "Dispatch to undefined method " << name << ".\n";
+        type = Object;
+        return this;
     }
+ 
+    // Type check formal parameters
+    std::vector<Symbol>::iterator iter = eval_types.begin();
+    int fi = formals->first();
+    while (iter != eval_types.end() && formals->more(fi)) {
+        Symbol eval_type = *iter;
+        Symbol declared_type = formals->nth(fi)->get_type();
+        if (declared_type == SELF_TYPE) {
+            ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+            err_stream << "Formal parameter cannot have type SELF_TYPE.\n";
+        }
+        else if (!env.ct->is_child(eval_type, declared_type)) {
+            ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+            err_stream << "Formal parameter declared type " << declared_type
+                       << " is not a subclass of " << eval_type << ".\n";
+        }
+        ++iter;
+        fi = formals->next(fi);
+    }
+    if (iter != eval_types.end() || formals->more(fi)) {
+        // If we're here, means the number of parameters didn't match
+        // the expected number from the function definition. This should
+        // not be possible as long as lexing and parsing is correct.
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "Number of declared formals doesn't match number checked.\n";
+    }
+
     if (ret_type == SELF_TYPE)
         type = t0;    
     else
@@ -699,13 +765,26 @@ Expression loop_class::type_check(type_env_t env) {
 Expression typcase_class::type_check(type_env_t env) {
     //cout << "In typecase_class\n";
     Symbol t0 = expr->type_check(env)->type;
-    // Warning: The following typechecks the first case twice.
-    //          Might need to change this.
+
+    for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
+        for (int j = cases->first(); cases->more(j); j = cases->next(j)) {
+            if (i != j && cases->nth(i)->get_type() == cases->nth(j)->get_type()) {
+                ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+                err_stream << "Duplicate branch " << cases->nth(i)->get_type()
+                           << " in case statement.\n";
+                type = Object;
+                return this;
+            }
+        }
+    }
+
     Symbol tn = cases->nth(cases->first())->type_check(env);
     for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
-        env.om->enterscope();
-        tn = env.ct->lub(tn, cases->nth(i)->type_check(env));
-        env.om->exitscope();
+        if (i != cases->first()) {
+            env.om->enterscope();
+            tn = env.ct->lub(tn, cases->nth(i)->type_check(env));
+            env.om->exitscope();
+        }
     }
     type = tn;
     return this;
@@ -723,29 +802,36 @@ Expression block_class::type_check(type_env_t env) {
 
 Expression let_class::type_check(type_env_t env) {
     //cout << "In let_class\n";
-    Symbol t0 = type_decl;
-    Symbol t1 = init->type_check(env)->type;
-    // No init
-    if (t1 == No_type) {
-        env.om->enterscope();
-        env.om->addid(identifier, &t0);
-        Symbol t2 = body->type_check(env)->type;
-        env.om->exitscope();
-        type = t2;
+    if (identifier == self) {
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        err_stream << "'self' cannot be bound in a 'let' expression.\n";
+        type = Object;
     }
-    // With init
     else {
-        if (env.ct->is_child(t1, t0)) {
+        Symbol t0 = type_decl;
+        Symbol t1 = init->type_check(env)->type;
+        // No init
+        if (t1 == No_type) {
             env.om->enterscope();
             env.om->addid(identifier, &t0);
             Symbol t2 = body->type_check(env)->type;
             env.om->exitscope();
             type = t2;
         }
+        // With init
         else {
-            ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
-            err_stream << "Expression must evaluate to a child of " << t0 << ".\n";
-            type = Object;
+            if (env.ct->is_child(t1, t0)) {
+                env.om->enterscope();
+                env.om->addid(identifier, &t0);
+                Symbol t2 = body->type_check(env)->type;
+                env.om->exitscope();
+                type = t2;
+            }
+            else {
+                ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+                err_stream << "Expression must evaluate to a child of " << t0 << ".\n";
+                type = Object;
+            }
         }
     }
     return this;
@@ -808,7 +894,7 @@ Expression neg_class::type_check(type_env_t env) {
     if (t1 == Int)
         type = Int;
     else {
-        ostream &err_stream = env.ct->semant_error(env.curr->get_filename(), this);
+        ostream& err_stream = env.ct->semant_error(env.curr->get_filename(), this);
         err_stream << "non-Int argument ~" << t1 << ".\n";
         type = Object;
     }
